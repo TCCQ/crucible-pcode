@@ -1,0 +1,290 @@
+* Background / intro
+** Symbols / Notation (unclear so far)
+Do I need to explain binary?
+** Machine model
+
+We are citing the computer organization and design book by
+Hennessy&Patterson in general.
+
+We want a general model of a computer to reason about. But modern
+computers are both complicated and vary significantly in their
+implementation of low level operations. Instead we want to reason
+about a general idealized computer, and then claim relevance to the
+real world via the argument that real computers are, for the most
+part, refinements of the general high level abstractions.
+
+This follows the pattern of the field, as these abstract computers
+predated physical machines that operated accord to those
+principles. {needed?}
+
+We consider a general Von Neumann architecture computer {cite}. For
+the purposes of this thesis, we will ignore input and output from the
+computer and all non-deterministic features. What remains is naturally
+divided into three interconnected subsystems.
+
+*** Values
+
+{!!! we need to explicitly state that values can be interpreted as
+numbers, \N or \Z}
+
+Before we can discuss the systems of a computer, we will benefit from
+a formalization of data in general. We consider the fundamental unit
+of meaningful data to be a value. A value is defined as a sequence of
+bytes, where each byte can also be undefined, in which case we do not
+know what it contains, and we cannot safely use it. A value can be a
+sequence of both defined and undefined bytes. A value has the natural
+property of length, defined as the number of bytes in the value.
+
+\[
+\len(v) = \mbox{ number of bytes in } v
+\]
+
+We will write $V$ for the set of all values, and $V_i$ for the set of
+all values of length $i$. Values are also equipped with two other
+natural operations, concatenation and separation. We define
+concatenation as
+
+\[
+\concat \colon V_i, V_j \to V_{i+j}
+\]
+Generally written
+\[
+a \concat b = c
+\]
+
+Where the resulting value is simply the input values placed end to end
+in order. This operation naturally extends to more than two arguments,
+as it is associative.
+
+We define separation to be the operation that undoes concatenation,
+however we must include one additional piece of information that was
+lost in concatenation, namely where the split should be.
+
+\[
+\sepr \colon V_{i+j}, \N_{\leq i+j} \to (V_i,V_j)
+\]
+Generally written
+\[
+\sepr(a,i) = (b,c)
+\]
+
+This operation returns a pair of the first $i$ bytes and the remaining
+bytes in order. This operation also extends naturally to taking a set
+of split points and returning a tuple with as many entries as $1$ plus
+the number of split points. {!!! need to explain how this extends?}
+
+Note that none of these operations operate on the contents of the
+value, only the type of value (i.e. the length). These operations work
+irrespective of if the bytes inside are undefined.
+
+With our notion of values in hand, we can proceed.
+
+*** Memory
+The first is Memory, which we conceptualize as a mapping of addresses
+to values
+
+{!!! motivation}
+
+\begin{align*}
+M\colon& \N \to V_1\\
+\colon& a \mapsto v
+\end{align*}
+
+Let $\M$ be the set of all such mappings.
+
+However it is cumbersome to talk about bytes individually when often
+we want to operate on sequences. We will extend our notation to
+
+\begin{align*}
+M\colon& \N,\N \to V\\
+\colon& a, l \mapsto v \mbox{ such that } \len(v) = l
+\end{align*}
+
+Where $v$ is the iterated concatenation of sequential addresses
+starting at $a$.
+
+\[
+v = M(a)\concat M(a+1) \concat M(a+2)\concat ... \concat M(a+l-1)
+\]
+
+Thus we have $v$ as the sequence of $l$ bytes starting at $a$.
+
+We define the operation called a read as invoking the function for our
+current memory state at the given address and for the given
+length. Thus we write
+
+\[
+\rd(M,a,l) = v
+\]
+
+exactly when
+
+\[
+M(a,l) = v
+\]
+
+Most of the time we will not write the memory function, as it will be
+clear from context.
+
+We define an operation called a write as taking a memory function, and
+returning another memory function such that the output of the memory
+function at the given address is altered, and all others remain the
+same.
+
+We write
+
+\[
+\wt_1(M,a,v) = M'
+\]
+where $\len(v) = 1$
+
+Such that
+
+\[
+\rd(M',a,1) = v
+\]
+and
+\[
+\rd(M',b,1) = \rd(M,b,1) \ \forall b\neq a
+\]
+
+We then extend $\wt_1$ naturally to
+
+\[
+\wt(M,a,v) = M'
+\]
+without the restriction on the length of $v$. This is equivalent to
+
+\[
+\wt(M,a,v) = \wt_1(... \wt_1(\wt_1(\wt_1(M,a,v_0), a+1, v_1), a+2, v_2) ..., a+l-1, v_{l-1})
+\]
+where $v_i$ is the $i$'th byte of $v$, and $l = \len(v)$. This is the
+composition of changing each byte one at a time.
+
+Once again, the value starting at $a$ is altered, and all others are
+preserved. Note that overlapping regions are affected as
+expected. {!!! justify?}
+
+We define these two operations that are thin wrappers around the
+behavior of our memory function in order to more conveniently model the
+way in which real computers interact with their memory. The memory
+functions as we have described them are simply a shorthand way to talk
+about the entire state of memory (all data that has been stored), in a
+compact form. It is equally useful to think about memory as a giant
+lookup table of values. (In fact they are exactly that in reality.)
+
+This formalism is meant to capture the intuition that memory holds
+onto data indexed by an address. We can ask for the data again without
+destroying it, and we can change the data so that further requests
+will return the new value. The only challenge is ensuring the correct
+behavior in the case of overlapping requests.
+
+*** Arithmetic
+
+The second subsystem of a general Von Neumann computer is the
+arithmetic processing unit, commonly abbreviated to APU. The APU is
+responsible for all simple operations of the computer. The most
+general formulation is a black box that knows about some fixed finite
+number of elementary operations. This box can be queried with an
+operation and the appropriate number of arguments and will return the
+operation applied to said arguments. We will not create a formal
+object to talk about the APU as a whole, but for a given elementary
+operation $\star$, the existence of the APU allows us to write
+
+\[
+v \star v' = v''
+\]
+
+and perform manipulations on the contents of values. This is what
+differentiates the APU. In this simple model, it is the only system
+that manipulates the data in a value rather than moving, copying,
+storing, retrieving, or otherwise doing some operation on the whole
+value. The difference being that all of those operations work without
+regard to the contents of the data ({!!! this is not a clear
+distinction} i.e. even concatenation and separation only copy or
+forget some of the value, the contained data is not manipulated in a
+semantically meaningful way.)
+
+Thus for some set of simple operations, we can now combine and
+manipulate values. Common included operations are the elementary
+arithmetic operations (addition, subtraction, multiplication, and
+division) and binary operations, (bit flips, bit shifts, sign or zero
+extensions). Our model is only concerned with integer values, but
+computers that deal with floating point values or other fundamental
+types of data may have need of other operations.
+
+*** Control
+
+The final subsystem is the subsystem of Control. This system varies in
+form between real computers more than the other two, but in general
+this system connects the other systems, directs the operations of the
+computer, and (in general) holds intermediate values of complex
+calculations or the working set of data at a given time.
+
+For the purposes of this section, fix some value length $l$. This is
+refereed to as the data width of the computer, and is the unit of data
+that most of the operations work on. A larger value allows for some
+efficiencies of control, but also reduces the speed of simple
+operations. A computer of data width $l$ can still operate on larger
+or smaller data, but in general they will be slower than on data of
+length $l$.
+
+{!!! too careful or too general?}
+
+The control system has some internal storage. This storage is called
+the register file, and it is separated into some fixed number of
+registers, each of length $l$. For the rest of the section, fix $k$ as
+the number of registers in the register file. Each register can hold a
+single value of length $l$, and as with memory, it will hold its value
+until explicitly changed. At a minimum, the Control system must have
+at least one register, the Program Counter register. Most computers
+will have a number of extra registers.
+
+The Control system is critical in that it is the engine that drives
+the rest of the computer. The innermost loop on which all actions are
+performed is as follows.
+
+The Control system reads the value at memory at the address stored in
+the Program counter.
+
+The resulting value is broken down into several sections and
+interpreted. This interpretation identifies a single action. This
+operation is often a APU operation, where the argument values should
+come from, and where the result value should go. However there are
+also memory operations, which take a location and read or write to it,
+and others, including altering the program counter subject to a
+condition on some other value.
+
+The argument values are acquired (generally from memory or from the
+register file), and fed into the APU or interpreted by the Control
+system.
+
+The resulting value is acquired from the APU or the side effects are
+produced by the Control system. For instance, on a memory read, the
+value from memory is acquired.
+
+The result value is placed in the specified location as per the
+interpretation of the fetched value at the program counter. Again,
+this is often a register or in memory. In the event of a memory write
+such as $\wt(M,a,v)$ where $M$ is the memory state before the
+instruction begins, then the resulting $M'$ is now the memory state
+after this instruction, and will be the assumed contextual memory
+state up to and including the next write.
+
+The program counter is incremented by $l$.
+
+This loop is then repeated forever. The effect of this loop is that
+the computer performs operations one at a time, in order, according to
+the sequence of values starting at the location pointed to by the
+initial program counter. What separates the Von Neumann model from
+other models (namely the Harvard model) is that the instructions (the
+values that specify actions) are not segregated from the data being
+operated on. A memory read or write can touch a piece of data that is
+being operated on by the program in the same way that it can touch the
+set of instructions. This insight that code is data allows for
+incredibly flexible programs that can edit themselves while running,
+or other high levels of abstraction.
+
+** Instruction / asm model (P-Code)
+** Satisfiablility
+
