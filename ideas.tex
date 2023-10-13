@@ -1,12 +1,44 @@
-* Background
-** Symbols / Notation
+% Created 2023-10-06 Fri 14:53
+% Intended LaTeX compiler: pdflatex
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{longtable}
+\usepackage{wrapfig}
+\usepackage{rotating}
+\usepackage[normalem]{ulem}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{capt-of}
+\usepackage{hyperref}
+\usepackage{tmuthesis}
+\author{Thomas Ulmer}
+\date{\today}
+\title{}
+\hypersetup{
+ pdfauthor={Thomas Ulmer},
+ pdftitle={},
+ pdfkeywords={},
+ pdfsubject={},
+ pdfcreator={Emacs 30.0.50 (Org mode 9.6.7)}, 
+ pdflang={English}}
+\begin{document}
+
+\tableofcontents
+
+\section{Background}
+\label{sec:org58cb969}
+\subsection{Symbols / Notation}
+\label{sec:org88649ea}
 I assume a working familiarity with binary. Knowledge of modular
 arithmetic is not required but familiarity with the notation will be
 of use.
-** Machine model
+\subsection{Machine model}
+\label{sec:org9e4d7bf}
 
 We are citing the computer organization and design book by
-Hennessy&Patterson in general.
+Hennessy\&Patterson in general.
 
 We want a general model of a computer to reason about. But modern
 computers are both complicated and vary significantly in their
@@ -17,14 +49,15 @@ general high level abstractions.
 
 This follows the pattern of the field, as these abstract computers
 predated physical machines that operated accord to those
-principles. {needed?}
+principles. \{needed?\}
 
-We consider a general Von Neumann architecture computer {cite}. For
+We consider a general Von Neumann architecture computer \{cite\}. For
 the purposes of this thesis, we will ignore input and output from the
 computer and all non-deterministic features. What remains is naturally
 divided into three interconnected subsystems.
 
-*** Byte Sequences
+\subsubsection{Byte Sequences}
+\label{sec:org2d95e54}
 
 Before we can discuss the systems of a computer, we will benefit from
 a formalization of data in general. We consider the fundamental unit
@@ -36,7 +69,7 @@ undefined bytes. A byte sequence has the natural property of length,
 defined as the number of bytes in the sequence. We may abbreviate byte
 sequence as b-sequence or b-seq.
 
-Let $B$ be the set of all b-sequences.
+Let \(B\) be the set of all b-sequences.
 
 \[
 \len\colon B &\to \N
@@ -46,8 +79,8 @@ where
 \len(b) = \mbox{ number of bytes in } b
 \]
 
-We will write $B$ for the set of all b-seqs, and $B_i$ for the set of
-all b-seqs of length $i$. These are mostly useful as terms to define
+We will write \(B\) for the set of all b-seqs, and \(B_i\) for the set of
+all b-seqs of length \(i\). These are mostly useful as terms to define
 operations on qualified length sequences without regard for the
 contents of the byte sequence, as below. Byte sequences are also
 equipped with two other natural operations, concatenation and
@@ -65,7 +98,7 @@ Where the resulting b-seq is simply the input b-seqs placed end to end
 in the order of the arguments. this operation naturally extends to
 more than two arguments, as it is associative.
 
-We define $split$ to be the operation that undoes concatenation,
+We define \(split\) to be the operation that undoes concatenation,
 however we must include one additional piece of information that was
 lost in concatenation, namely where the split should be.
 
@@ -77,9 +110,9 @@ generally written
 \spt(a,i) = (b,c) \mbox{ when } a = b \concat c \mbox{ and } \len(b) = i
 \]
 
-This operation returns a pair of the first $i$ bytes and the remaining
+This operation returns a pair of the first \(i\) bytes and the remaining
 bytes in order. This operation also extends naturally to taking a set
-of split points and returning a tuple with as many entries as $1$ plus
+of split points and returning a tuple with as many entries as \(1\) plus
 the number of split points.
 
 It is reasonable to assume that a fully defined byte sequence
@@ -114,7 +147,8 @@ that preserves semantic meaning if that is desired.
 
 With our notion of byte sequences in hand, we can proceed.
 
-*** Memory
+\subsubsection{Memory}
+\label{sec:org8ad202d}
 The first is Memory, which we conceptualize as a function of addresses
 to values
 
@@ -123,7 +157,7 @@ M\colon& \N \to B_1\\
 \colon& a \mapsto b
 \end{align*}
 
-Let $\M$ be the set of all such functions.
+Let \(\M\) be the set of all such functions.
 
 However it is cumbersome to talk about bytes individually when often
 we want to operate on b-sequences, most commonly words, which will be
@@ -134,20 +168,20 @@ M\colon& \N,\N \to B\\
 \colon& a, l \mapsto b \mbox{ such that } \len(b) = l
 \end{align*}
 
-where $b$ is the iterated concatenation of sequential addresses
-starting at $a$.
+where \(b\) is the iterated concatenation of sequential addresses
+starting at \(a\).
 
 \[
 b = m(a)\concat m(a+1) \concat m(a+2)\concat ... \concat m(a+l-1)
 \]
 
-thus we have $b$ as the sequence of $l$ bytes starting at $a$. Once
-again, the existence of semantic meaning of $b$ depends wholly on the
+thus we have \(b\) as the sequence of \(l\) bytes starting at \(a\). Once
+again, the existence of semantic meaning of \(b\) depends wholly on the
 linear sequence of bytes being fetched being in the same order as is
 desired in the resulting b-seq. Once again this definition is
 endianness agnostic.
 
-We define the operation called a $read$ as invoking the function for
+We define the operation called a \(read\) as invoking the function for
 our current memory state at the given address and for the given
 length. thus we write
 
@@ -164,7 +198,7 @@ m(a,l) = b
 Most of the time we will not write the memory function, as it will be
 clear from context.
 
-We define an operation called a $write$ as taking a memory function, and
+We define an operation called a \(write\) as taking a memory function, and
 returning another memory function such that the output of the memory
 function at the given address is altered, and all others remain the
 same.
@@ -174,7 +208,7 @@ we write
 \[
 writebyte(m,a,b) = m'
 \]
-where $\len(b) = 1$ such that
+where \(\len(b) = 1\) such that
 \[
 \rd(m',a,1) = b
 \]
@@ -182,11 +216,11 @@ and
 \[
 \rd(m',a',1) = \rd(m,a',1) \ \forall a'\neq a.
 \]
-We can then extend $writebyte$ naturally to
+We can then extend \(writebyte\) naturally to
 \[
 \wt(m,a,b) = m'
 \]
-without the restriction on the length of $b$. this is equivalent to
+without the restriction on the length of \(b\). this is equivalent to
 
 \begin{align*}
 writebyte(m,a,b) =& writebyte_1(...(\\
@@ -196,20 +230,20 @@ writebyte(m,a,b) =& writebyte_1(...(\\
 &\quad ...),\\
 &a+l-1, b_{l-1})
 \end{align*}
-where $b_i$ is the $i$ th byte of $b$, and $l = \len(b)$. This is the
+where \(b_i\) is the \(i\) th byte of \(b\), and \(l = \len(b)\). This is the
 composition of changing each byte one at a time. Once again, the value
-starting at $a$ and extending for $l$ bytes is altered, and all others
+starting at \(a\) and extending for \(l\) bytes is altered, and all others
 are preserved.
 
-We say a memory access is $s$ aligned if the address is a
-multiple of $s$.
+We say a memory access is \(s\) aligned if the address is a
+multiple of \(s\).
 \[
 a \equiv_s 0
 \]
-We say an access is naturally aligned if the address is $l$ aligned
-where $l$ is the length of the access.
+We say an access is naturally aligned if the address is \(l\) aligned
+where \(l\) is the length of the access.
 
-Our model is not limited to only naturally or $s$ aligned accesses and
+Our model is not limited to only naturally or \(s\) aligned accesses and
 will operate in a defined and reasonable way even for unaligned
 accesses. However this is not true for all computers. Many computers
 limit defined behavior to access that are naturally aligned or aligned
@@ -229,7 +263,8 @@ This formalism is meant to capture the intuition that memory holds
 onto data indexed by an address. We can ask for the data again without
 destroying it, and we can change the data so that further requests
 will return the new value.
-*** Arithmetic
+\subsubsection{Arithmetic}
+\label{sec:org8e1eec3}
 
 The second subsystem of a general Von Neumann computer is the
 arithmetic logic unit, commonly abbreviated to ALU. The ALU is
@@ -239,7 +274,7 @@ number of elementary operations. This box can be queried with an
 operation and the appropriate number of arguments and will return the
 operation applied to said arguments. We will not create a formal
 object to talk about the ALU as a whole, but for a given elementary
-operation $\star$ on byte sequences of appropriate length, the
+operation \(\star\) on byte sequences of appropriate length, the
 existence of the ALU allows us to write
 
 \[
@@ -271,7 +306,8 @@ concerned with integer values, but computers that deal with floating
 point values or other fundamental types of data may have need of other
 operations.
 
-*** Control
+\subsubsection{Control}
+\label{sec:orga5f8baf}
 
 The final subsystem is the subsystem of Control. This system varies in
 form between real computers more than the other two, but in general
@@ -279,21 +315,21 @@ this system connects the other systems, directs the operations of the
 computer, and (in general) holds intermediate values of complex
 calculations or the working set of data at a given time.
 
-For the purposes of this section, fix some length $l$. This is
+For the purposes of this section, fix some length \(l\). This is
 referred to as the data width or word width of the computer, and is
 the unit of data that most of the operations work on. A byte sequence
-of length $l$ is called a word. A computer of data width $l$ can still
+of length \(l\) is called a word. A computer of data width \(l\) can still
 operate on larger or smaller data, but in general they will be slower
-than on data of length $l$. In general, the ALU will have dedicated
+than on data of length \(l\). In general, the ALU will have dedicated
 versions of common operations such as addition on various data
 lengths, and operations to extend or truncate a sequence to a
 different length while preserving the semantic meaning of the data.
 
 The control system has some internal storage. This storage is called
 the register file, and it is separated into some fixed number of
-registers, each of length $l$. For the rest of the section, fix $k$ as
+registers, each of length \(l\). For the rest of the section, fix \(k\) as
 the number of registers in the register file. Each register can hold a
-single b-seq of length $l$, and as with memory, it will hold its value
+single b-seq of length \(l\), and as with memory, it will hold its value
 until explicitly changed. At a minimum, the Control system must have
 at least one register, the Program Counter register. Most computers
 will have a number of extra registers. The Program Counter register
@@ -353,6 +389,8 @@ it can touch the set of instructions. This insight that code is data
 allows for incredibly flexible programs that can edit themselves while
 running, or other high levels of abstraction.
 
-** Instruction / asm model (P-Code)
-** Satisfiablility
-
+\subsection{Instruction / asm model (P-Code)}
+\label{sec:orgaa30e34}
+\subsection{Satisfiablility}
+\label{sec:orgfd6ea0a}
+\end{document}

@@ -1,0 +1,73 @@
+* Background / intro
+** Symbols / Notation (unclear so far)
+Do I need to explain binary?
+** Machine model
+
+We are citing the computer organization and design book by
+Hennessy&Patterson in general.
+
+We want a general model of a computer to reason about. But modern
+computers are both complicated and vary significantly in their
+implementation of low level operations. Instead we want to reason
+about a general idealized computer, and then claim relevance to the
+real world via the argument that real computers are, for the most
+part, refinements of the general high level abstractions.
+
+This follows the pattern of the field, as these abstract computers
+predated physical machines that operated accord to those
+principles. {needed?}
+
+We consider a general Von Neumann architecture computer {cite}. For
+the purposes of this thesis, we will ignore input and output from the
+computer and all non-deterministic features. What remains is naturally
+divided into three interconnected subsystems.
+
+*** Memory
+The first is Memory, which we conceptualize as a mapping of addresses
+with lengths to values
+
+\[
+\mem \ni M: (\N, \N)\to V
+\]
+
+Where $
+
+A length of $1$ represents a single byte, and a length greater than
+$1$ represents a contiguous sequence of bytes starting at the given
+address. The resulting value is a sequence of bytes of the same length
+as was requested, where each byte may be present or undefined. It is
+valid to mix undefined values with defined ones, as one may fetch
+multiple sequential pieces of semantic data in a single memory
+request.
+
+Memory is used for storing data. Memory can be read or written. A byte
+at location A will remain the same value, including undefined, until
+it has been explicitly changed by the program via a write. Note that
+this assumption does not hold in more powerful or general models due
+to the possible effects of input devices, or other processing
+occurring at the same time. A pair of reads will return the same value
+so long as there is not a write between that touches an overlapping
+region with that of the reads. Note that a write may change the value
+at a location in memory to the same value as it was before the write,
+and that such a write is impossible to detect only using
+reads. However such a write cannot be ignored safely unless it is know
+that the only value that can be written at the given time is the value
+that is already in memory at that location.
+
+A memory read is for memory $M$ is simple invocation of the mapping
+given above on a $(address,length)$ pair. A read returns a value
+appropriate to its inputs.
+
+A memory write for memory $M$ is a function
+
+\[
+W: (\M, (N, N)) \to \M'
+\]
+
+That takes a memory mapping like the one above and an
+$(address,length)$ pair and returns a modified memory mapping such
+that a read invoked on
+
+** Instruction / asm model (P-Code)
+** Satisfiablility
+
