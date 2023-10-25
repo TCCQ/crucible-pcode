@@ -41,9 +41,9 @@ vnFromPrinted str =
 
 -- Should give matching results as the format given by the dumping
 -- script
-vnShow :: VarNode -> String
-vnShow (VarNode as off len) =
-  "(" ++ as ++ ", 0x" ++ showHex off ", " ++ show len ++ ")"
+instance Show (VarNode) where
+  show (VarNode as off len) =
+    "(" ++ as ++ ", 0x" ++ showHex off ", " ++ (show len) ++ ")"
 
 -- -------------------------------------------------------------------
 -- Pcode operations.
@@ -54,66 +54,6 @@ vnShow (VarNode as off len) =
 -- See the reference, the formal semantics, or my writeup for what
 -- they do.
 
-data PO_COPY            = VarNode VarNode
-data PO_INT_ADD         = VarNode VarNode VarNode
-data PO_BOOL_OR         = VarNode VarNode VarNode
-data PO_LOAD            = VarNode VarNode VarNode
-data PO_INT_SUB         = VarNode VarNode VarNode
-data PO_FLOAT_EQUAL     = VarNode VarNode VarNode
-data PO_STORE           = VarNode VarNode VarNode
-data PO_INT_CARRY       = VarNode VarNode VarNode
-data PO_FLOAT_NOTEQUAL  = VarNode VarNode VarNode
-data PO_BRANCH          = VarNode -- See the reference for interpretation
-data PO_INT_SCARRY      = VarNode VarNode VarNode
-data PO_FLOAT_LESS      = VarNode VarNode VarNode
-data PO_CBRANCH         = VarNode VarNode
-data PO_INT_SBORROW     = VarNode VarNode VarNode
-data PO_FLOAT_LESSEQUAL = VarNode VarNode VarNode
-data PO_BRANCHIND       = VarNode
-data PO_INT_2COMP       = VarNode VarNode
-data PO_FLOAT_ADD       = VarNode VarNode VarNode
-data PO_CALL            = VarNode -- In raw Pcode only ever one input
-data PO_INT_NEGATE      = VarNode VarNode
-data PO_FLOAT_SUB       = VarNode VarNode VarNode
-data PO_CALLIND         = VarNode
-data PO_INT_XOR         = VarNode VarNode VarNode
-data PO_FLOAT_MULT      = VarNode VarNode VarNode
-data PO_INT_AND         = VarNode VarNode VarNode VarNode VarNode
-data PO_FLOAT_DIV       = VarNode VarNode VarNode
-data PO_RETURN          = VarNode -- In raw Pcode only ever one input
-data PO_INT_OR          = VarNode VarNode VarNode
-data PO_FLOAT_NEG       = VarNode VarNode
-data PO_PIECE           = VarNode VarNode VarNode
-data PO_INT_LEFT        = VarNode VarNode VarNode
-data PO_FLOAT_ABS       = VarNode VarNode
-data PO_SUBPIECE        = VarNode VarNode VarNode -- Second input should be constant
-data PO_INT_RIGHT       = VarNode VarNode VarNode
-data PO_FLOAT_SQRT      = VarNode VarNode
-data PO_INT_EQUAL       = VarNode VarNode VarNode
-data PO_INT_SRIGHT      = VarNode VarNode VarNode
-data PO_FLOAT_CEIL      = VarNode VarNode
-data PO_INT_NOTEQUAL    = VarNode VarNode VarNode
-data PO_INT_MULT        = VarNode VarNode VarNode
-data PO_FLOAT_FLOOR     = VarNode VarNode
-data PO_INT_LESS        = VarNode VarNode VarNode
-data PO_INT_DIV         = VarNode VarNode VarNode
-data PO_FLOAT_ROUND     = VarNode VarNode
-data PO_INT_SLESS       = VarNode VarNode VarNode
-data PO_INT_REM         = VarNode VarNode VarNode
-data PO_FLOAT_NAN       = VarNode VarNode
-data PO_INT_LESSEQUAL   = VarNode VarNode VarNode
-data PO_INT_SDIV        = VarNode VarNode VarNode
-data PO_INT2FLOAT       = VarNode VarNode
-data PO_INT_SLESSEQUAL  = VarNode VarNode VarNode
-data PO_INT_SREM        = VarNode VarNode VarNode
-data PO_FLOAT2FLOAT     = VarNode VarNode
-data PO_INT_ZEXT        = VarNode VarNode
-data PO_BOOL_NEGATE     = VarNode VarNode
-data PO_TRUNC           = VarNode VarNode
-data PO_INT_SEXT        = VarNode VarNode
-data PO_BOOL_XOR        = VarNode VarNode VarNode
-data PO_BOOL_AND        = VarNode VarNode VarNode
--- PO_POPCOUNT ? TODO
 
 -- These Shouldn't appear in raw pcode
 -- data PO_CPOOLREF = -- variadic
@@ -122,33 +62,152 @@ data PO_BOOL_AND        = VarNode VarNode VarNode
 
 -- Type for a single Pcode instruction.
 data POpt =
-  PO_COPY | PO_INT_ADD | PO_BOOL_OR |
-  PO_LOAD | PO_INT_SUB | POFLOAT_EQUAL |
-  PO_STORE | PO_INT_CARRY | PO_FLOAT_NOTEQUAL |
-  PO_BRANCH | PO_INT_SCARRY | PO_FLOAT_LESS |
-  PO_CBRANCH | PO_INT_SBORROW | PO_FLOAT_LESSEQUAL |
-  PO_BRANCHIND | PO_INT_2COMP | PO_FLOAT_ADD |
-  PO_CALL | PO_INT_NEGATE | PO_FLOAT_SUB |
-  PO_CALLIND | PO_INT_XOR | PO_FLOAT_MULT |
-  PO_INT_AND | PO_FLOAT_DIV | PO_RETURN |
-  PO_INT_OR | PO_FLOAT_NEG | PO_PIECE |
-  PO_INT_LEFT | PO_FLOAT_ABS | PO_SUBPIECE |
-  PO_INT_RIGHT | PO_FLOAT_SQRT | PO_INT_EQUAL |
-  PO_INT_SRIGHT | PO_FLOAT_CEIL | PO_INT_NOTEQUAL |
-  PO_INT_MULT | PO_FLOAT_FLOOR | PO_INT_LESS |
-  PO_INT_DIV | PO_FLOAT_ROUND | PO_INT_SLESS |
-  PO_INT_REM | PO_FLOAT_NAN | PO_INT_LESSEQUAL |
-  PO_INT_SDIV | PO_INT2FLOAT | PO_INT_SLESSEQUAL |
-  PO_INT_SREM | PO_FLOAT2FLOAT | PO_INT_ZEXT |
-  PO_BOOL_NEGATE | PO_TRUNC | PO_INT_SEXT |
-  PO_BOOL_XOR | PO_BOOL_AND
+  PO_COPY VarNode VarNode |
+  PO_INT_ADD VarNode VarNode VarNode |
+  PO_BOOL_OR VarNode VarNode VarNode |
+  PO_LOAD VarNode VarNode VarNode |
+  PO_INT_SUB VarNode VarNode VarNode |
+  PO_FLOAT_EQUAL VarNode VarNode VarNode |
+  PO_STORE VarNode VarNode VarNode |
+  PO_INT_CARRY VarNode VarNode VarNode |
+  PO_FLOAT_NOTEQUAL VarNode VarNode VarNode |
+  PO_BRANCH VarNode | -- See the reference for interpretation
+  PO_INT_SCARRY VarNode VarNode VarNode |
+  PO_FLOAT_LESS VarNode VarNode VarNode |
+  PO_CBRANCH VarNode VarNode |
+  PO_INT_SBORROW VarNode VarNode VarNode |
+  PO_FLOAT_LESSEQUAL VarNode VarNode VarNode |
+  PO_BRANCHIND VarNode |
+  PO_INT_2COMP VarNode VarNode |
+  PO_FLOAT_ADD VarNode VarNode VarNode |
+  PO_CALL VarNode | -- In raw Pcode only ever one input
+  PO_INT_NEGATE VarNode VarNode |
+  PO_FLOAT_SUB VarNode VarNode VarNode |
+  PO_CALLIND VarNode |
+  PO_INT_XOR VarNode VarNode VarNode |
+  PO_FLOAT_MULT VarNode VarNode VarNode |
+  PO_INT_AND VarNode VarNode VarNode |
+  PO_FLOAT_DIV VarNode VarNode VarNode |
+  PO_RETURN VarNode | -- In raw Pcode only ever one input
+  PO_INT_OR VarNode VarNode VarNode |
+  PO_FLOAT_NEG VarNode VarNode |
+  PO_PIECE VarNode VarNode VarNode |
+  PO_INT_LEFT VarNode VarNode VarNode |
+  PO_FLOAT_ABS VarNode VarNode |
+  PO_SUBPIECE VarNode VarNode VarNode | -- Second input should be constant
+  PO_INT_RIGHT VarNode VarNode VarNode |
+  PO_FLOAT_SQRT VarNode VarNode |
+  PO_INT_EQUAL VarNode VarNode VarNode |
+  PO_INT_SRIGHT VarNode VarNode VarNode |
+  PO_FLOAT_CEIL VarNode VarNode |
+  PO_INT_NOTEQUAL VarNode VarNode VarNode |
+  PO_INT_MULT VarNode VarNode VarNode |
+  PO_FLOAT_FLOOR VarNode VarNode |
+  PO_INT_LESS VarNode VarNode VarNode |
+  PO_INT_DIV VarNode VarNode VarNode |
+  PO_FLOAT_ROUND VarNode VarNode |
+  PO_INT_SLESS VarNode VarNode VarNode |
+  PO_INT_REM VarNode VarNode VarNode |
+  PO_FLOAT_NAN VarNode VarNode |
+  PO_INT_LESSEQUAL VarNode VarNode VarNode |
+  PO_INT_SDIV VarNode VarNode VarNode |
+  PO_INT2FLOAT VarNode VarNode |
+  PO_INT_SLESSEQUAL VarNode VarNode VarNode |
+  PO_INT_SREM VarNode VarNode VarNode |
+  PO_FLOAT2FLOAT VarNode VarNode |
+  PO_INT_ZEXT VarNode VarNode |
+  PO_BOOL_NEGATE VarNode VarNode |
+  PO_TRUNC VarNode VarNode |
+  PO_INT_SEXT VarNode VarNode |
+  PO_BOOL_XOR VarNode VarNode VarNode |
+  PO_BOOL_AND VarNode VarNode VarNode
+-- PO_POPCOUNT ? TODO
 
--- Expects the format given by the
-POptFromPrinted :: String -> Maybe POpt
+-- Expects the format given by dumping script
+-- POptFromPrinted :: String -> Maybe POpt
 
 -- Prints a representation that should match the above and the dumping
 -- script
-POptShow :: POpt -> String
+
+instance Show (POpt) where
+  show (PO_COPY a b) = "COPY " ++ show a ++ " " ++ show b
+  show (PO_INT_ADD a b c) = "INT_ADD " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_BOOL_OR a b c) = "BOOL_OR " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_LOAD a b c) = "LOAD " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_SUB a b c) = "INT_SUB " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_FLOAT_EQUAL a b c) = "FLOAT_EQUAL " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_STORE a b c) = "STORE " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_CARRY a b c) = "INT_CARRY " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_FLOAT_NOTEQUAL a b c) = "FLOAT_NOTEQUAL " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_BRANCH a) = "BRANCH " ++ show a
+  show (PO_INT_SCARRY a b c) = "INT_SCARRY " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_FLOAT_LESS a b c) = "FLOAT_LESS " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_CBRANCH a b) = "CBRANCH " ++ show a ++ " " ++ show b
+  show (PO_INT_SBORROW a b c) = "INT_SBORROW " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_FLOAT_LESSEQUAL a b c) = "FLOAT_LESSEQUAL " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_BRANCHIND a) = "BRANCHIND " ++ show a
+  show (PO_INT_2COMP a b) = "INT_2COMP " ++ show a ++ " " ++ show b
+  show (PO_FLOAT_ADD a b c) = "FLOAT_ADD " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_CALL a) = "CALL " ++ show a
+  show (PO_INT_NEGATE a b) = "INT_NEGATE " ++ show a ++ " " ++ show b
+  show (PO_FLOAT_SUB a b c) = "FLOAT_SUB " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_CALLIND a) = "CALLIND " ++ show a
+  show (PO_INT_XOR a b c) = "INT_XOR " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_FLOAT_MULT a b c) = "FLOAT_MULT " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_AND a b c) = "INT_AND " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_FLOAT_DIV a b c) = "FLOAT_DIV " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_RETURN a) = "RETURN " ++ show a
+  show (PO_INT_OR a b c) = "INT_OR " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_FLOAT_NEG a b) = "FLOAT_NEG " ++ show a ++ " " ++ show b
+  show (PO_PIECE a b c) = "PIECE " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_LEFT a b c) = "INT_LEFT " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_FLOAT_ABS a b) = "FLOAT_ABS " ++ show a ++ " " ++ show b
+  show (PO_SUBPIECE a b c) = "SUBPIECE " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_RIGHT a b c) = "INT_RIGHT " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_FLOAT_SQRT a b) = "FLOAT_SQRT " ++ show a ++ " " ++ show b
+  show (PO_INT_EQUAL a b c) = "INT_EQUAL " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_SRIGHT a b c) = "INT_SRIGHT " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_FLOAT_CEIL a b) = "FLOAT_CEIL " ++ show a ++ " " ++ show b
+  show (PO_INT_NOTEQUAL a b c) = "INT_NOTEQUAL " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_MULT a b c) = "INT_MULT " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_FLOAT_FLOOR a b) = "FLOAT_FLOOR " ++ show a ++ " " ++ show b
+  show (PO_INT_LESS a b c) = "INT_LESS " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_DIV a b c) = "INT_DIV " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_FLOAT_ROUND a b) = "FLOAT_ROUND " ++ show a ++ " " ++ show b
+  show (PO_INT_SLESS a b c) = "INT_SLESS " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_REM a b c) = "INT_REM " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_FLOAT_NAN a b) = "FLOAT_NAN " ++ show a ++ " " ++ show b
+  show (PO_INT_LESSEQUAL a b c) = "INT_LESSEQUAL " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_SDIV a b c) = "INT_SDIV " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT2FLOAT a b) = "INT2FLOAT " ++ show a ++ " " ++ show b
+  show (PO_INT_SLESSEQUAL a b c) = "INT_SLESSEQUAL " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_SREM a b c) = "INT_SREM " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_FLOAT2FLOAT a b) = "FLOAT2FLOAT " ++ show a ++ " " ++ show b
+  show (PO_INT_ZEXT a b) = "INT_ZEXT " ++ show a ++ " " ++ show b
+  show (PO_BOOL_NEGATE a b) = "BOOL_NEGATE " ++ show a ++ " " ++ show b
+  show (PO_TRUNC a b) = "TRUNC " ++ show a ++ " " ++ show b
+  show (PO_INT_SEXT a b) = "INT_SEXT " ++ show a ++ " " ++ show b
+  show (PO_BOOL_XOR a b c) = "BOOL_XOR " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_BOOL_AND a b c) = "BOOL_AND " ++ show a ++ " " ++ show b ++ " " ++ show c
+
+
+
+-- A Machine address, a Pcode operation and the index of said
+-- operation inside the machine instruction. This encoding allows for
+-- operation on sequences of this type without data loss.
+data PInst = PInst Integer POpt Integer
+
+-- Formated like the dump
+-- PInstFromPrinted :: String -> Maybe POpt
+
+-- Prints a representation that should match the above and the dumping
+-- script
+instance Show (PInst) where
+  show (PInst mpc p off) =
+    showHex mpc $ ":" ++ showHex off (" " ++ show p)
+
+-- TODO these two following sections are not clearly useful, so they
+-- will remain commented for now
 
 -- -------------------------------------------------------------------
 -- Machine operations.
@@ -166,7 +225,7 @@ POptShow :: POpt -> String
 
 -- Single Machine instruction. An sequence of PCode
 -- Operations. Information like location are not internal.
-data MOpt = [POpt]
+-- data MOpt = [POpt]
 
 -- -------------------------------------------------------------------
 -- Function blocks
@@ -194,7 +253,18 @@ data MOpt = [POpt]
 -- how much semantically meaningful info can we recover? We don't want
 -- to rehash Ghidra, so meaning recovery isn't really the focus.
 
--- A named sequence of machine instructions associated with their
--- machine address.
-data FunctionBlock = String [(Integer, MOpt)]
 
+
+-- -------------------------------------------------------------------
+--
+-- Blocks are sequences of Pcode that we have reason to believe are
+-- atomic with respect to control flow.
+--
+-- Note that full confidence requires analysis of indirect branches
+
+-- Atomic block with respect to control flow.
+data PBlock = PBlock [PInst]
+
+-- TODO do we need a fromPrinted here?
+
+-- PBlockShow :: PBlock -> String
