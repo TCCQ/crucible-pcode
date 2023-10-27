@@ -1,8 +1,9 @@
 -- This file should have types that will be of general use
 
 import Numeric (showHex)
-import Data.Text (Text, pack, empty)
+import Data.Text (Text, pack, unpack, empty, strip)
 import Data.Text.Read (decimal, hexadecimal)
+import Data.List (elemIndex)
 import Data.Either (fromRight)
 import Debug.Trace (trace)
 
@@ -22,8 +23,8 @@ length (VarNode _ _ len) = len
 
 -- Expects a parenthesized string representation like is produced by
 -- the dumping script or the `vnShow` bellow
-vnFromPrinted :: String -> Maybe VarNode
-vnFromPrinted str =
+fromPrintedVarNode :: String -> Maybe VarNode
+fromPrintedVarNode str =
   case break (==',') (tail (init str)) of
     (addr, ',':' ':rest) ->
       case break (==',') rest of
@@ -54,11 +55,6 @@ instance Show (VarNode) where
 -- See the reference, the formal semantics, or my writeup for what
 -- they do.
 
-
--- These Shouldn't appear in raw pcode
--- data PO_CPOOLREF = -- variadic
--- data PO_NEW = -- variadic
--- data PO_USERDEFINED = -- variadic
 
 -- Type for a single Pcode instruction.
 data POpt =
@@ -123,12 +119,35 @@ data POpt =
   PO_BOOL_AND VarNode VarNode VarNode
 -- PO_POPCOUNT ? TODO
 
+-- These Shouldn't appear in raw pcode
+-- data PO_CPOOLREF = -- variadic
+-- data PO_NEW = -- variadic
+-- data PO_USERDEFINED = -- variadic
+
+parserState :: String -> (Maybe String, String)
+parserState "" = (Nothing, "")
+parserState str =
+  let stripped = unpack $ strip $ pack str
+      space = elemIndex ' ' stripped
+      paren = elemIndex ')' stripped
+  in
+    if head stripped == '('
+    then case paren of
+              Just p -> (Just (take (p + 1) stripped), drop (p + 2) stripped)
+              Nothing -> (Nothing, str)
+    else case space of
+      Just s -> (Just (take s stripped), drop (s + 1) stripped)
+      Nothing -> (Nothing, str)
+
+
 -- Expects the format given by dumping script
--- POptFromPrinted :: String -> Maybe POpt
+-- fromprintedPOpt :: String -> Maybe POpt
+-- fromprintedPOpt (str) =
+--   let parseStr (s) =
+
 
 -- Prints a representation that should match the above and the dumping
 -- script
-
 instance Show (POpt) where
   show (PO_COPY a b) = "COPY " ++ show a ++ " " ++ show b
   show (PO_INT_ADD a b c) = "INT_ADD " ++ show a ++ " " ++ show b ++ " " ++ show c
@@ -197,11 +216,8 @@ instance Show (POpt) where
 -- operation on sequences of this type without data loss.
 data PInst = PInst Integer POpt Integer
 
--- Formated like the dump
--- PInstFromPrinted :: String -> Maybe POpt
-
--- Prints a representation that should match the above and the dumping
--- script
+-- Not quite the same format as the dump, includes the offset
+-- explicitly
 instance Show (PInst) where
   show (PInst mpc p off) =
     showHex mpc $ ":" ++ showHex off (" " ++ show p)
@@ -265,6 +281,6 @@ instance Show (PInst) where
 -- Atomic block with respect to control flow.
 data PBlock = PBlock [PInst]
 
--- TODO do we need a fromPrinted here?
-
--- PBlockShow :: PBlock -> String
+instance Show (PBlock) where
+  show (PBlock list) =
+    concat $ map show list
