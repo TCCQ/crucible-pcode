@@ -124,8 +124,31 @@ data POpt =
 -- data PO_NEW = -- variadic
 -- data PO_USERDEFINED = -- variadic
 
-parserState :: String -> (Maybe String, String)
-parserState "" = (Nothing, "")
+
+
+-- The use here is the first token and the rest of the line both as
+-- strings. It's generic to allow operating on strings with a split
+-- type operation in a Monadic fashion.
+--
+-- TODO MAJOR DANGER ZONE. GET OUTSIDE EYES --------------------------
+data TokenRest s = TR s s
+
+instance Functor TokenRest where
+  fmap f (TR _ s) = TR undefined (f s)
+
+instance Applicative TokenRest where
+  pure a = TR undefined a
+  TR _ f <*> TR t s = TR undefined (f s)
+
+instance Monad TokenRest where
+  return a = TR undefined a
+  TR _ a >>= f = f a
+  -- discards the first element and replaces it with the result of f
+
+-- TODO END DANGER ZONE ----------------------------------------------
+
+parserState :: String -> TokenRest String
+parserState "" = TR "" ""
 parserState str =
   let stripped = unpack $ strip $ pack str
       space = elemIndex ' ' stripped
@@ -133,17 +156,18 @@ parserState str =
   in
     if head stripped == '('
     then case paren of
-              Just p -> (Just (take (p + 1) stripped), drop (p + 2) stripped)
-              Nothing -> (Nothing, str)
+              Just p -> TR (take (p + 1) stripped) (drop (p + 2) stripped)
+              Nothing -> TR "" str
     else case space of
-      Just s -> (Just (take s stripped), drop (s + 1) stripped)
-      Nothing -> (Nothing, str)
+      Just s -> TR (take s stripped) (drop (s + 1) stripped)
+      Nothing -> TR "" str
 
+-- TODO is there some way for this to be monadic? seems like it might be?
 
 -- Expects the format given by dumping script
 -- fromprintedPOpt :: String -> Maybe POpt
 -- fromprintedPOpt (str) =
---   let parseStr (s) =
+
 
 
 -- Prints a representation that should match the above and the dumping
