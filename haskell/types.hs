@@ -131,18 +131,23 @@ data POpt =
 -- type operation in a Monadic fashion.
 --
 -- TODO MAJOR DANGER ZONE. GET OUTSIDE EYES --------------------------
-data TokenRest s = TR s s
+
+newtype TokenRest s = TR (Maybe s, Maybe s)
 
 instance Functor TokenRest where
-  fmap f (TR _ s) = TR undefined (f s)
+  fmap f (TR (t, Just s)) = TR (t, Just (f s))
+  fmap f (TR (t, Nothing)) = TR (t, Nothing)
+  -- TODO is ^ right?
 
 instance Applicative TokenRest where
-  pure a = TR undefined a
-  TR _ f <*> TR t s = TR undefined (f s)
+  pure a = TR (Nothing, Just a)
+  TR (_, f) <*> TR (t, Just s) = TR (t, Just (f s))
+  TR (_, f) <*> TR (t, Nothing) = TR (t, Nothing)
+  -- TODO ^ same question
 
 instance Monad TokenRest where
-  return a = TR undefined a
-  TR _ a >>= f = f a
+  return = pure
+  TR (_, a) >>= f = f a
   -- discards the first element and replaces it with the result of f
 
 -- TODO END DANGER ZONE ----------------------------------------------
