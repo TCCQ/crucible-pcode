@@ -132,28 +132,39 @@ data POpt =
 --
 -- TODO MAJOR DANGER ZONE. GET OUTSIDE EYES --------------------------
 
+-- TODO I'm taking the "no errors / undefined behavior" attitude
+-- here, but idk if that's best
+
 newtype TokenRest s = TR (Maybe s, Maybe s)
 
 instance Functor TokenRest where
-  fmap f (TR (t, Just s)) = TR (t, Just (f s))
-  fmap f (TR (t, Nothing)) = TR (t, Nothing)
+  fmap f (TR (Just t, Just s)) = TR (Just (f t), Just (f s))
+  fmap f (TR (Just t, Nothing)) = TR (Just (f t), Nothing)
+  fmap f (TR (Nothing, Just s)) = TR (Nothing, Just (f s))
+  fmap f (TR (Nothing, Nothing)) = TR (Nothing, Nothing)
   -- TODO is ^ right?
 
 instance Applicative TokenRest where
   pure a = TR (Nothing, Just a)
-  TR (_, f) <*> TR (t, Just s) = TR (t, Just (f s))
-  TR (_, f) <*> TR (t, Nothing) = TR (t, Nothing)
+  TR (_, Just f) <*> TR (Just t, Just s) = TR (Just (f t), Just (f s))
+  TR (_, Just f) <*> TR (Just t, Nothing) = TR (Just (f t), Nothing)
+  TR (_, Just f) <*> TR (Nothing, Just s) = TR (Nothing, Just (f s))
+  TR (_, Just f) <*> TR (Nothing, Nothing) = TR (Nothing, Nothing)
+  TR (_, Nothing) <*> TR (_, _) = TR (Nothing, Nothing)
   -- TODO ^ same question
 
 instance Monad TokenRest where
   return = pure
-  TR (_, a) >>= f = f a
+  TR (_, Just a) >>= f = f a
+  -- This line is the only reason we are doing any of this
+  TR (_, Nothing) >>= f = TR (Nothing, Nothing)
+  -- TODO ^ same question
   -- discards the first element and replaces it with the result of f
 
 -- TODO END DANGER ZONE ----------------------------------------------
 
 parserState :: String -> TokenRest String
-parserState "" = TR "" ""
+parserState "" = TR (Nothing, Nothing)
 parserState str =
   let stripped = unpack $ strip $ pack str
       space = elemIndex ' ' stripped
@@ -161,11 +172,13 @@ parserState str =
   in
     if head stripped == '('
     then case paren of
-              Just p -> TR (take (p + 1) stripped) (drop (p + 2) stripped)
-              Nothing -> TR "" str
+           -- we are looking for parens, case on the close location
+           Just p -> TR (Just (take (p + 1) stripped), Just (drop (p + 2) stripped))
+           Nothing -> TR (Nothing, Just str)
     else case space of
-      Just s -> TR (take s stripped) (drop (s + 1) stripped)
-      Nothing -> TR "" str
+           -- we are looking for spaces, case on space location
+           Just s -> TR (Just (take s stripped), Just (drop (s + 1) stripped))
+           Nothing -> TR (Nothing, Just str)
 
 -- TODO is there some way for this to be monadic? seems like it might be?
 
