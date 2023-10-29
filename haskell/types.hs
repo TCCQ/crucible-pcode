@@ -116,15 +116,155 @@ data POpt =
   PO_TRUNC VarNode VarNode |
   PO_INT_SEXT VarNode VarNode |
   PO_BOOL_XOR VarNode VarNode VarNode |
-  PO_BOOL_AND VarNode VarNode VarNode
--- PO_POPCOUNT ? TODO
+  PO_BOOL_AND VarNode VarNode VarNode |
+  PO_POPCOUNT VarNode VarNode
 
 -- These Shouldn't appear in raw pcode
 -- data PO_CPOOLREF = -- variadic
 -- data PO_NEW = -- variadic
 -- data PO_USERDEFINED = -- variadic
 
+-- The number of arguments to expect given the string name of the
+-- optcode
+numArgs :: String -> Maybe Integer
+numArgs opt =
+  case opt of
+    "COPY"            -> Just 2
+    "INT_ADD"         -> Just 3
+    "BOOL_OR"         -> Just 3
+    "LOAD"            -> Just 3
+    "INT_SUB"         -> Just 3
+    "FLOAT_EQUAL"     -> Just 3
+    "STORE"           -> Just 3
+    "INT_CARRY"       -> Just 3
+    "FLOAT_NOTEQUAL"  -> Just 3
+    "BRANCH"          -> Just 1
+    "INT_SCARRY"      -> Just 3
+    "FLOAT_LESS"      -> Just 3
+    "CBRANCH"         -> Just 2
+    "INT_SBORROW"     -> Just 3
+    "FLOAT_LESSEQUAL" -> Just 3
+    "BRANCHIND"       -> Just 1
+    "INT_2COMP"       -> Just 2
+    "FLOAT_ADD"       -> Just 3
+    "CALL"            -> Just 1
+    "INT_NEGATE"      -> Just 2
+    "FLOAT_SUB"       -> Just 3
+    "CALLIND"         -> Just 1
+    "INT_XOR"         -> Just 3
+    "FLOAT_MULT"      -> Just 3
+    "INT_AND"         -> Just 3
+    "FLOAT_DIV"       -> Just 3
+    "RETURN"          -> Just 1
+    "INT_OR"          -> Just 3
+    "FLOAT_NEG"       -> Just 2
+    "PIECE"           -> Just 3
+    "INT_LEFT"        -> Just 3
+    "FLOAT_ABS"       -> Just 2
+    "SUBPIECE"        -> Just 3
+    "INT_RIGHT"       -> Just 3
+    "FLOAT_SQRT"      -> Just 2
+    "INT_EQUAL"       -> Just 3
+    "INT_SRIGHT"      -> Just 3
+    "FLOAT_CEIL"      -> Just 2
+    "INT_NOTEQUAL"    -> Just 3
+    "INT_MULT"        -> Just 3
+    "FLOAT_FLOOR"     -> Just 2
+    "INT_LESS"        -> Just 3
+    "INT_DIV"         -> Just 3
+    "FLOAT_ROUND"     -> Just 2
+    "INT_SLESS"       -> Just 3
+    "INT_REM"         -> Just 3
+    "FLOAT_NAN"       -> Just 2
+    "INT_LESSEQUAL"   -> Just 3
+    "INT_SDIV"        -> Just 3
+    "INT2FLOAT"       -> Just 2
+    "INT_SLESSEQUAL"  -> Just 3
+    "INT_SREM"        -> Just 3
+    "FLOAT2FLOAT"     -> Just 2
+    "INT_ZEXT"        -> Just 2
+    "BOOL_NEGATE"     -> Just 2
+    "TRUNC"           -> Just 2
+    "INT_SEXT"        -> Just 2
+    "BOOL_XOR"        -> Just 3
+    "BOOL_AND"        -> Just 3
+    "POPCOUNT"        -> Just 2
+    otherwise         -> Nothing
 
+strToPOCon1 :: String -> Maybe (VarNode -> POpt)
+strToPOCon1 opt =
+  case opt of
+    "BRANCH"          -> Just PO_BRANCH
+    "BRANCHIND"       -> Just PO_BRANCHIND
+    "CALL"            -> Just PO_CALL
+    "CALLIND"         -> Just PO_CALLIND
+    "RETURN"          -> Just PO_RETURN
+    otherwise         -> Nothing
+
+strToPOCon2 :: String -> Maybe (VarNode -> VarNode -> POpt)
+strToPOCon2 opt =
+  case opt of
+    "COPY"            -> Just PO_COPY
+    "CBRANCH"         -> Just PO_CBRANCH
+    "INT_2COMP"       -> Just PO_INT_2COMP
+    "INT_NEGATE"      -> Just PO_INT_NEGATE
+    "FLOAT_NEG"       -> Just PO_FLOAT_NEG
+    "FLOAT_ABS"       -> Just PO_FLOAT_ABS
+    "FLOAT_SQRT"      -> Just PO_FLOAT_SQRT
+    "FLOAT_CEIL"      -> Just PO_FLOAT_CEIL
+    "FLOAT_FLOOR"     -> Just PO_FLOAT_FLOOR
+    "FLOAT_ROUND"     -> Just PO_FLOAT_ROUND
+    "FLOAT_NAN"       -> Just PO_FLOAT_NAN
+    "INT2FLOAT"       -> Just PO_INT2FLOAT
+    "FLOAT2FLOAT"     -> Just PO_FLOAT2FLOAT
+    "INT_ZEXT"        -> Just PO_INT_ZEXT
+    "BOOL_NEGATE"     -> Just PO_BOOL_NEGATE
+    "TRUNC"           -> Just PO_TRUNC
+    "INT_SEXT"        -> Just PO_INT_SEXT
+    "POPCOUNT"        -> Just PO_POPCOUNT
+    otherwise         -> Nothing
+
+strToPOCon3 :: String -> Maybe (VarNode -> VarNode -> VarNode -> POpt)
+strToPOCon3 opt =
+  case opt of
+    "INT_ADD"         -> Just PO_INT_ADD
+    "BOOL_OR"         -> Just PO_BOOL_OR
+    "LOAD"            -> Just PO_LOAD
+    "INT_SUB"         -> Just PO_INT_SUB
+    "FLOAT_EQUAL"     -> Just PO_FLOAT_EQUAL
+    "STORE"           -> Just PO_STORE
+    "INT_CARRY"       -> Just PO_INT_CARRY
+    "FLOAT_NOTEQUAL"  -> Just PO_FLOAT_NOTEQUAL
+    "INT_SCARRY"      -> Just PO_INT_SCARRY
+    "FLOAT_LESS"      -> Just PO_FLOAT_LESS
+    "INT_SBORROW"     -> Just PO_INT_SBORROW
+    "FLOAT_LESSEQUAL" -> Just PO_FLOAT_LESSEQUAL
+    "FLOAT_ADD"       -> Just PO_FLOAT_ADD
+    "FLOAT_SUB"       -> Just PO_FLOAT_SUB
+    "INT_XOR"         -> Just PO_INT_XOR
+    "FLOAT_MULT"      -> Just PO_FLOAT_MULT
+    "INT_AND"         -> Just PO_INT_AND
+    "FLOAT_DIV"       -> Just PO_FLOAT_DIV
+    "INT_OR"          -> Just PO_INT_OR
+    "PIECE"           -> Just PO_PIECE
+    "INT_LEFT"        -> Just PO_INT_LEFT
+    "SUBPIECE"        -> Just PO_SUBPIECE
+    "INT_RIGHT"       -> Just PO_INT_RIGHT
+    "INT_EQUAL"       -> Just PO_INT_EQUAL
+    "INT_SRIGHT"      -> Just PO_INT_SRIGHT
+    "INT_NOTEQUAL"    -> Just PO_INT_NOTEQUAL
+    "INT_MULT"        -> Just PO_INT_MULT
+    "INT_LESS"        -> Just PO_INT_LESS
+    "INT_DIV"         -> Just PO_INT_DIV
+    "INT_SLESS"       -> Just PO_INT_SLESS
+    "INT_REM"         -> Just PO_INT_REM
+    "INT_LESSEQUAL"   -> Just PO_INT_LESSEQUAL
+    "INT_SDIV"        -> Just PO_INT_SDIV
+    "INT_SLESSEQUAL"  -> Just PO_INT_SLESSEQUAL
+    "INT_SREM"        -> Just PO_INT_SREM
+    "BOOL_XOR"        -> Just PO_BOOL_XOR
+    "BOOL_AND"        -> Just PO_BOOL_AND
+    otherwise         -> Nothing
 
 -- The use here is the first token and the rest of the line both as
 -- strings. It's generic to allow operating on strings with a split
@@ -134,6 +274,12 @@ data POpt =
 
 -- TODO I'm taking the "no errors / undefined behavior" attitude
 -- here, but idk if that's best
+
+-- The idea here is that you have two maybes of the same type. Then
+-- you can apply functions through the maybe, and functions are
+-- applied to both. If you wrap functions in TokenRest, then the
+-- second is applied to both arguments, and if it is Nothing, then it
+-- produces a Nothing Pair
 
 newtype TokenRest s = TR (Maybe s, Maybe s)
 
@@ -156,16 +302,15 @@ instance Applicative TokenRest where
 instance Monad TokenRest where
   return = pure
   TR (_, Just a) >>= f = f a
-  -- This line is the only reason we are doing any of this
+  -- This ^ line is the only reason we are doing any of this
   TR (_, Nothing) >>= f = TR (Nothing, Nothing)
   -- TODO ^ same question
   -- discards the first element and replaces it with the result of f
 
--- TODO END DANGER ZONE ----------------------------------------------
 
-parserState :: String -> TokenRest String
-parserState "" = TR (Nothing, Nothing)
-parserState str =
+parseSingle :: String -> TokenRest String
+parseSingle "" = TR (Nothing, Nothing)
+parseSingle str =
   let stripped = unpack $ strip $ pack str
       space = elemIndex ' ' stripped
       paren = elemIndex ')' stripped
@@ -180,77 +325,110 @@ parserState str =
            Just s -> TR (Just (take s stripped), Just (drop (s + 1) stripped))
            Nothing -> TR (Nothing, Just str)
 
--- TODO is there some way for this to be monadic? seems like it might be?
 
 -- Expects the format given by dumping script
--- fromprintedPOpt :: String -> Maybe POpt
--- fromprintedPOpt (str) =
+fromPrintedPOpt :: String -> Maybe POpt
+fromPrintedPOpt str =
+  case (return str >>= parseSingle) of
+    TR (Nothing, Nothing) -> Nothing -- Should never happen
+    TR (Just opt, Nothing) -> Nothing -- No zero arg opts
+    TR (Nothing, Just rest) -> Nothing -- Should never happen
+    out1@(TR (Just opt, Just rest)) -> -- main case
+      case numArgs opt of
+        Just 1 -> case (out1 >>= parseSingle) of
+          TR (Nothing, _) -> Nothing
+          TR (marg1, _) ->
+            strToPOCon1 opt <*> (marg1 >>= fromPrintedVarNode)
+            -- we can save tine and not unwrap the Maybe since we want
+            -- to return one anway. Yay Monads!
+        Just 2 -> case (out1 >>= parseSingle) of
+          TR (Nothing, _) -> Nothing
+          TR (_, Nothing) -> Nothing
+          out2@(TR (marg1, _)) -> case (out2 >>= parseSingle) of
+            TR (Nothing, _) -> Nothing
+            TR (marg2, _) -> strToPOCon2 opt <*>
+                                  (marg1 >>= fromPrintedVarNode) <*>
+                                  (marg2 >>= fromPrintedVarNode)
+        Just 3 -> case (out1 >>= parseSingle) of
+          TR (Nothing, _) -> Nothing
+          TR (_, Nothing) -> Nothing
+          out2@(TR (marg1, _)) -> case (out2 >>= parseSingle) of
+            TR (Nothing, _) -> Nothing
+            TR (_, Nothing) -> Nothing
+            out3@(TR (marg2, _)) -> case (out3 >>= parseSingle) of
+              TR (Nothing, _) -> Nothing
+              TR (marg3, _) -> strToPOCon3 opt <*>
+                                    (marg1 >>= fromPrintedVarNode) <*>
+                                    (marg2 >>= fromPrintedVarNode) <*>
+                                    (marg3 >>= fromPrintedVarNode)
 
+
+-- TODO END DANGER ZONE ----------------------------------------------
 
 
 -- Prints a representation that should match the above and the dumping
 -- script
 instance Show (POpt) where
-  show (PO_COPY a b) = "COPY " ++ show a ++ " " ++ show b
-  show (PO_INT_ADD a b c) = "INT_ADD " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_BOOL_OR a b c) = "BOOL_OR " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_LOAD a b c) = "LOAD " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_INT_SUB a b c) = "INT_SUB " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_FLOAT_EQUAL a b c) = "FLOAT_EQUAL " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_STORE a b c) = "STORE " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_INT_CARRY a b c) = "INT_CARRY " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_FLOAT_NOTEQUAL a b c) = "FLOAT_NOTEQUAL " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_COPY a b) = "COPY " ++ show a ++ ", " ++ show b
+  show (PO_INT_ADD a b c) = "INT_ADD " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_BOOL_OR a b c) = "BOOL_OR " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_LOAD a b c) = "LOAD " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_INT_SUB a b c) = "INT_SUB " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_FLOAT_EQUAL a b c) = "FLOAT_EQUAL " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_STORE a b c) = "STORE " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_INT_CARRY a b c) = "INT_CARRY " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_FLOAT_NOTEQUAL a b c) = "FLOAT_NOTEQUAL " ++ show a ++ ", " ++ show b ++ ", " ++ show c
   show (PO_BRANCH a) = "BRANCH " ++ show a
-  show (PO_INT_SCARRY a b c) = "INT_SCARRY " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_FLOAT_LESS a b c) = "FLOAT_LESS " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_CBRANCH a b) = "CBRANCH " ++ show a ++ " " ++ show b
-  show (PO_INT_SBORROW a b c) = "INT_SBORROW " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_FLOAT_LESSEQUAL a b c) = "FLOAT_LESSEQUAL " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_SCARRY a b c) = "INT_SCARRY " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_FLOAT_LESS a b c) = "FLOAT_LESS " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_CBRANCH a b) = "CBRANCH " ++ show a ++ ", " ++ show b
+  show (PO_INT_SBORROW a b c) = "INT_SBORROW " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_FLOAT_LESSEQUAL a b c) = "FLOAT_LESSEQUAL " ++ show a ++ ", " ++ show b ++ ", " ++ show c
   show (PO_BRANCHIND a) = "BRANCHIND " ++ show a
-  show (PO_INT_2COMP a b) = "INT_2COMP " ++ show a ++ " " ++ show b
-  show (PO_FLOAT_ADD a b c) = "FLOAT_ADD " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_2COMP a b) = "INT_2COMP " ++ show a ++ ", " ++ show b
+  show (PO_FLOAT_ADD a b c) = "FLOAT_ADD " ++ show a ++ ", " ++ show b ++ ", " ++ show c
   show (PO_CALL a) = "CALL " ++ show a
-  show (PO_INT_NEGATE a b) = "INT_NEGATE " ++ show a ++ " " ++ show b
-  show (PO_FLOAT_SUB a b c) = "FLOAT_SUB " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_NEGATE a b) = "INT_NEGATE " ++ show a ++ ", " ++ show b
+  show (PO_FLOAT_SUB a b c) = "FLOAT_SUB " ++ show a ++ ", " ++ show b ++ ", " ++ show c
   show (PO_CALLIND a) = "CALLIND " ++ show a
-  show (PO_INT_XOR a b c) = "INT_XOR " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_FLOAT_MULT a b c) = "FLOAT_MULT " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_INT_AND a b c) = "INT_AND " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_FLOAT_DIV a b c) = "FLOAT_DIV " ++ show a ++ " " ++ show b ++ " " ++ show c
+  show (PO_INT_XOR a b c) = "INT_XOR " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_FLOAT_MULT a b c) = "FLOAT_MULT " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_INT_AND a b c) = "INT_AND " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_FLOAT_DIV a b c) = "FLOAT_DIV " ++ show a ++ ", " ++ show b ++ ", " ++ show c
   show (PO_RETURN a) = "RETURN " ++ show a
-  show (PO_INT_OR a b c) = "INT_OR " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_FLOAT_NEG a b) = "FLOAT_NEG " ++ show a ++ " " ++ show b
-  show (PO_PIECE a b c) = "PIECE " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_INT_LEFT a b c) = "INT_LEFT " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_FLOAT_ABS a b) = "FLOAT_ABS " ++ show a ++ " " ++ show b
-  show (PO_SUBPIECE a b c) = "SUBPIECE " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_INT_RIGHT a b c) = "INT_RIGHT " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_FLOAT_SQRT a b) = "FLOAT_SQRT " ++ show a ++ " " ++ show b
-  show (PO_INT_EQUAL a b c) = "INT_EQUAL " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_INT_SRIGHT a b c) = "INT_SRIGHT " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_FLOAT_CEIL a b) = "FLOAT_CEIL " ++ show a ++ " " ++ show b
-  show (PO_INT_NOTEQUAL a b c) = "INT_NOTEQUAL " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_INT_MULT a b c) = "INT_MULT " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_FLOAT_FLOOR a b) = "FLOAT_FLOOR " ++ show a ++ " " ++ show b
-  show (PO_INT_LESS a b c) = "INT_LESS " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_INT_DIV a b c) = "INT_DIV " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_FLOAT_ROUND a b) = "FLOAT_ROUND " ++ show a ++ " " ++ show b
-  show (PO_INT_SLESS a b c) = "INT_SLESS " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_INT_REM a b c) = "INT_REM " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_FLOAT_NAN a b) = "FLOAT_NAN " ++ show a ++ " " ++ show b
-  show (PO_INT_LESSEQUAL a b c) = "INT_LESSEQUAL " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_INT_SDIV a b c) = "INT_SDIV " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_INT2FLOAT a b) = "INT2FLOAT " ++ show a ++ " " ++ show b
-  show (PO_INT_SLESSEQUAL a b c) = "INT_SLESSEQUAL " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_INT_SREM a b c) = "INT_SREM " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_FLOAT2FLOAT a b) = "FLOAT2FLOAT " ++ show a ++ " " ++ show b
-  show (PO_INT_ZEXT a b) = "INT_ZEXT " ++ show a ++ " " ++ show b
-  show (PO_BOOL_NEGATE a b) = "BOOL_NEGATE " ++ show a ++ " " ++ show b
-  show (PO_TRUNC a b) = "TRUNC " ++ show a ++ " " ++ show b
-  show (PO_INT_SEXT a b) = "INT_SEXT " ++ show a ++ " " ++ show b
-  show (PO_BOOL_XOR a b c) = "BOOL_XOR " ++ show a ++ " " ++ show b ++ " " ++ show c
-  show (PO_BOOL_AND a b c) = "BOOL_AND " ++ show a ++ " " ++ show b ++ " " ++ show c
-
+  show (PO_INT_OR a b c) = "INT_OR " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_FLOAT_NEG a b) = "FLOAT_NEG " ++ show a ++ ", " ++ show b
+  show (PO_PIECE a b c) = "PIECE " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_INT_LEFT a b c) = "INT_LEFT " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_FLOAT_ABS a b) = "FLOAT_ABS " ++ show a ++ ", " ++ show b
+  show (PO_SUBPIECE a b c) = "SUBPIECE " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_INT_RIGHT a b c) = "INT_RIGHT " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_FLOAT_SQRT a b) = "FLOAT_SQRT " ++ show a ++ ", " ++ show b
+  show (PO_INT_EQUAL a b c) = "INT_EQUAL " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_INT_SRIGHT a b c) = "INT_SRIGHT " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_FLOAT_CEIL a b) = "FLOAT_CEIL " ++ show a ++ ", " ++ show b
+  show (PO_INT_NOTEQUAL a b c) = "INT_NOTEQUAL " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_INT_MULT a b c) = "INT_MULT " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_FLOAT_FLOOR a b) = "FLOAT_FLOOR " ++ show a ++ ", " ++ show b
+  show (PO_INT_LESS a b c) = "INT_LESS " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_INT_DIV a b c) = "INT_DIV " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_FLOAT_ROUND a b) = "FLOAT_ROUND " ++ show a ++ ", " ++ show b
+  show (PO_INT_SLESS a b c) = "INT_SLESS " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_INT_REM a b c) = "INT_REM " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_FLOAT_NAN a b) = "FLOAT_NAN " ++ show a ++ ", " ++ show b
+  show (PO_INT_LESSEQUAL a b c) = "INT_LESSEQUAL " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_INT_SDIV a b c) = "INT_SDIV " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_INT2FLOAT a b) = "INT2FLOAT " ++ show a ++ ", " ++ show b
+  show (PO_INT_SLESSEQUAL a b c) = "INT_SLESSEQUAL " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_INT_SREM a b c) = "INT_SREM " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_FLOAT2FLOAT a b) = "FLOAT2FLOAT " ++ show a ++ ", " ++ show b
+  show (PO_INT_ZEXT a b) = "INT_ZEXT " ++ show a ++ ", " ++ show b
+  show (PO_BOOL_NEGATE a b) = "BOOL_NEGATE " ++ show a ++ ", " ++ show b
+  show (PO_TRUNC a b) = "TRUNC " ++ show a ++ ", " ++ show b
+  show (PO_INT_SEXT a b) = "INT_SEXT " ++ show a ++ ", " ++ show b
+  show (PO_BOOL_XOR a b c) = "BOOL_XOR " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_BOOL_AND a b c) = "BOOL_AND " ++ show a ++ ", " ++ show b ++ ", " ++ show c
+  show (PO_POPCOUNT a b) = "POPCOUNT " ++ show a ++ ", " ++ show b
 
 
 -- A Machine address, a Pcode operation and the index of said
