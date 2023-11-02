@@ -1,7 +1,7 @@
 -- This file should have types that will be of general use
 
 import Numeric (showHex)
-import Data.Text (Text, pack, unpack, empty, strip)
+import Data.Text (Text, pack, unpack, empty, strip, splitOn)
 import Data.Text.Read (decimal, hexadecimal)
 import Data.List (elemIndex)
 import Data.Either (fromRight)
@@ -431,6 +431,7 @@ instance Show (POpt) where
   show (PO_POPCOUNT a b) = "POPCOUNT " ++ show a ++ ", " ++ show b
 
 
+
 -- A Machine address, a Pcode operation and the index of said
 -- operation inside the machine instruction. This encoding allows for
 -- operation on sequences of this type without data loss.
@@ -440,7 +441,21 @@ data PInst = PInst Integer POpt Integer
 -- explicitly
 instance Show (PInst) where
   show (PInst mpc p off) =
-    showHex mpc $ ":" ++ showHex off (" " ++ show p)
+    showHex mpc $ "\t" ++ showHex off ("\t" ++ show p)
+
+fromPrintedPInst :: String -> Maybe PInst
+fromPrintedPInst line =
+  let tokens = splitOn (pack "\t") (pack line)
+      eaddress = hexadecimal $ head tokens
+      eoffset = decimal $ head $ tail tokens
+      eitherToMaybe = (\ e -> case e of
+                          Left _ -> Nothing
+                          Right (a, _) -> Just a)
+      maddress = eitherToMaybe eaddress
+      moffset = eitherToMaybe eoffset
+      rest = unpack $ head $ drop 2 tokens
+  in
+    (Just PInst) <*> maddress <*> (fromPrintedPOpt rest) <*> moffset
 
 -- TODO these two following sections are not clearly useful, so they
 -- will remain commented for now
