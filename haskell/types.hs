@@ -3,7 +3,7 @@
 import Numeric (showHex)
 import Data.Text (Text, pack, unpack, empty, strip, splitOn)
 import Data.Text.Read (decimal, hexadecimal)
-import Data.List (elemIndex)
+import Data.List (elemIndex, stripPrefix)
 import Data.Either (fromRight)
 import Debug.Trace (trace)
 
@@ -431,7 +431,6 @@ instance Show (POpt) where
   show (PO_POPCOUNT a b) = "POPCOUNT " ++ show a ++ ", " ++ show b
 
 
-
 -- A Machine address, a Pcode operation and the index of said
 -- operation inside the machine instruction. This encoding allows for
 -- operation on sequences of this type without data loss.
@@ -457,26 +456,20 @@ fromPrintedPInst line =
   in
     (Just PInst) <*> maddress <*> (fromPrintedPOpt rest) <*> moffset
 
--- TODO these two following sections are not clearly useful, so they
--- will remain commented for now
 
 -- -------------------------------------------------------------------
--- Machine operations.
 --
--- Simply groupings of Pcode operations. There can be internal pcode
--- relative control flow, but this is the granularity of machine
--- visible branches. So control flow graphs may not respect these
--- divisions, as a conditional branch that optionally sets things like
--- control registers may have a branch POpt in a non-tail position.
+-- Blocks are sequences of Pcode that we have reason to believe are
+-- atomic with respect to control flow.
 --
--- TODO test that claim
---
--- Unclear how useful this is, but it's an interesting and possibly
--- insightful semantic division.
+-- Note that full confidence requires analysis of indirect branches
 
--- Single Machine instruction. An sequence of PCode
--- Operations. Information like location are not internal.
--- data MOpt = [POpt]
+-- Atomic block with respect to control flow.
+data PBlock = PBlock [PInst]
+
+instance Show (PBlock) where
+  show (PBlock list) =
+    concat $ map ((++"\n") . show) list
 
 -- -------------------------------------------------------------------
 -- Function blocks
@@ -499,23 +492,55 @@ fromPrintedPInst line =
 -- lines.
 --
 -- TODO we should check that our assumptions hold. I.E. things like
--- not jumping between different functions accept with calls and
+-- not jumping between different functions except with calls and
 -- returns. How isolated are these? How strongly can we reason, and
 -- how much semantically meaningful info can we recover? We don't want
 -- to rehash Ghidra, so meaning recovery isn't really the focus.
 
+data FuncBlock = FuncBlock String [PBlock]
 
+-- TODO do we want this to match the dump like others?
+instance Show FuncBlock where
+  show (FuncBlock name blocks) =
+    name ++ "\n" ++ (concat $ map ((++"\n") . show) blocks)
 
+-- Big blocks, use Data.Text
+--
+-- TODO this produces unanalyzed funcblocks. Make that a type difference?
+fromPrintedFuncBlock :: Text -> Maybe FuncBlock
+fromPrintedFuncBlock text =
+  let lines = splitOn (pack "\n") text
+      mname = stripPrefix "FUNCTION\t\t" $ unpack $ head lines
+      body = tail lines
+      listmPInst = map (fromPrintedPInst . unpack) body
+      listmaybetomaybelist [] = Just []
+      listmaybetomaybelist (x:xs) = case x of
+        Nothing -> Nothing
+        Just a -> case listmaybetomaybelist xs of
+          Nothing -> Nothing
+          Just as -> Just (a:as)
+      -- This function is by ChatGPT. Looks like there ought to be a
+      -- monad solution, but I can't find one.
+  in
+    case listmaybetomaybelist listmPInst of
+      Nothing -> Nothing
+      Just lp -> case mname of
+        Nothing -> Nothing
+        Just name -> Just $ FuncBlock name $ [PBlock lp]
 -- -------------------------------------------------------------------
+-- Machine operations.
 --
--- Blocks are sequences of Pcode that we have reason to believe are
--- atomic with respect to control flow.
+-- Simply groupings of Pcode operations. There can be internal pcode
+-- relative control flow, but this is the granularity of machine
+-- visible branches. So control flow graphs may not respect these
+-- divisions, as a conditional branch that optionally sets things like
+-- control registers may have a branch POpt in a non-tail position.
 --
--- Note that full confidence requires analysis of indirect branches
+-- TODO test that claim
+--
+-- Unclear how useful this is, but it's an interesting and possibly
+-- insightful semantic division.
 
--- Atomic block with respect to control flow.
-data PBlock = PBlock [PInst]
-
-instance Show (PBlock) where
-  show (PBlock list) =
-    concat $ map show list
+-- Single Machine instruction. An sequence of PCode
+-- Operations. Information like location are not internal.
+-- data MOpt = [POpt]
