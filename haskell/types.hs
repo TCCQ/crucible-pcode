@@ -1,11 +1,16 @@
 -- This file should have types that will be of general use
 
+-- TODO make the fromPrinted_ into a Read typeclass so I don't have to import them
+module PCode (VarNode, POpt, PInst, PBlock, FuncBlock, fromPrintedFuncBlock) where
+
 import Numeric (showHex)
 import Data.Text (Text, pack, unpack, empty, strip, splitOn)
 import Data.Text.Read (decimal, hexadecimal)
 import Data.List (elemIndex, stripPrefix)
 import Data.Either (fromRight)
 import Debug.Trace (trace)
+
+
 
 -- (Address Space Id, offset (signed for constants), Length/Size)
 -- Length should always be >= 0 I think
