@@ -1,7 +1,9 @@
 -- This file should have types that will be of general use
 
--- TODO make the fromPrinted_ into a Read typeclass so I don't have to import them
-module PCode (VarNode, POpt, PInst, PBlock, FuncBlock, fromPrintedFuncBlock) where
+-- TODO make the fromPrinted_ into a Read typeclass so I don't have to import them.
+--
+-- TODO make this a nice list with shadowing ( but I also want all the POpt constructors)
+module PCode where
 
 import Numeric (showHex)
 import Data.Text (Text, pack, unpack, empty, strip, splitOn)
