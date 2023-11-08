@@ -11,6 +11,7 @@ import Data.Text.Read (decimal, hexadecimal)
 import Data.List (elemIndex, stripPrefix)
 import Data.Either (fromRight)
 import Debug.Trace (trace)
+import Data.Matrix
 
 
 
@@ -534,6 +535,10 @@ fromPrintedFuncBlock text =
       Just lp -> case mname of
         Nothing -> Nothing
         Just name -> Just $ FuncBlock name $ [PBlock lp]
+
+
+
+
 -- -------------------------------------------------------------------
 -- Machine operations.
 --
