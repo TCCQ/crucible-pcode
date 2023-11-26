@@ -6,7 +6,7 @@ module PCode where
 import Numeric (showHex)
 import Data.Text (Text, pack, unpack, empty, strip, splitOn)
 import Data.Text.Read (decimal, hexadecimal)
-import Data.List (elemIndex, stripPrefix)
+import Data.List (elemIndex, stripPrefix, find)
 import Data.Either (fromRight)
 import Debug.Trace (trace)
 -- import Data.Matrix
@@ -15,17 +15,11 @@ import Debug.Trace (trace)
 
 -- (Address Space Id, offset (signed for constants), Length/Size)
 -- Length should always be >= 0 I think
-data VarNode = VarNode String Integer Integer deriving (Show, Read)
-
--- getters
--- addressSpace :: VarNode -> String
--- addressSpace (VarNode as _ _) = as
-
--- offset :: VarNode -> Integer
--- offset (VarNode _ off _) = off
-
--- length :: VarNode -> Integer
--- length (VarNode _ _ len) = len
+data VarNode = VarNode {
+  addrSpace :: String,
+  vnOffset :: Integer,
+  vnLength :: Integer
+  } deriving (Show, Read)
 
 -- -------------------------------------------------------------------
 -- Pcode operations.
@@ -109,96 +103,176 @@ data POpt =
 -- A Machine address, a Pcode operation and the index of said
 -- operation inside the machine instruction. This encoding allows for
 -- operation on sequences of this type without data loss.
-data PInst = PInst Integer POpt Integer deriving (Show, Read)
-
--- -------------------------------------------------------------------
 --
--- Blocks are sequences of Pcode that we have reason to believe are
--- atomic with respect to control flow.
+-- (machine addr, Opt, P-code offset)
+data PInst = PInst {
+  maddr :: Integer,
+  opt :: POpt,
+  pIOffset :: Integer
+  } deriving (Show, Read)
+
+
+type PAddr = (Integer, Integer)
+-- ^ Readability, (maddr, offset) pair
 --
--- Note that full confidence requires analysis of indirect branches
+-- This isn't a newtype with instanced Ord because I don't want to
+-- have to unwrap PInst every time
+comparePAddr :: PAddr -> PAddr -> Ordering
+(am, ap) `comparePAddr` (bm, bp) =
+  case am `compare` bm of
+    LT -> LT
+    GT -> GT
+    EQ -> ap `compare` bp
 
--- Atomic block with respect to control flow.
-data PBlock = PBlock [PInst]
+location :: PInst -> PAddr
+location (PInst m _ o) = (m, o)
 
-instance Show (PBlock) where
-  show (PBlock list) =
-    concat $ map ((++"\n") . show) list
+at :: PInst -> PAddr -> Bool
+-- ^ Is this instruction here? likely want infix for smooth reading
+at (PInst imaddr _opt ioff) (bmaddr, boff) =
+  (imaddr == bmaddr) && (ioff == boff)
 
--- -------------------------------------------------------------------
--- Function blocks
---
--- A high level block of code at the granularity of machine
--- instructions. These should be semantically meaningful divisions to
--- the programmer. I.E. a single subroutine in the original language
--- or something of that ilk.
---
--- These divisions are useful because it's hard to reason about the
--- program from the pcode at a level higher than this. If we take
--- these are C-esque functions, then they all have variable entry
--- points, and they return to a variable location from the stack. That
--- value is runtime dependent, and while we could draw up a list of
--- possibilities for many programs (first order programs if I had to
--- catagorize off the cuff :thinking:), these are divisions about
--- which there is principled and thus restrained operations. Putting
--- aside some optimization, this is a location that generally conforms
--- to a calling convention and thus we can easily divide along these
--- lines.
---
--- TODO we should check that our assumptions hold. I.E. things like
--- not jumping between different functions except with calls and
--- returns. How isolated are these? How strongly can we reason, and
--- how much semantically meaningful info can we recover? We don't want
--- to rehash Ghidra, so meaning recovery isn't really the focus.
+branchTarget :: PInst -> PAddr
+{- ^ Extract the correct target for branches and conditional
+branches. Do the discriminating between pcode relative and regular
+here. Only cares about the non-fallthrough target if there is more
+than one possible successor instruction. -}
 
-data FuncBlock = FuncBlock String [PBlock]
+-- TODO this is incomeplete, but I think we should be good? I think it
+-- should be enforced at compile time?
+branchTarget inst@(PInst maddr (BRANCH (VarNode space vnoffset length)) pioffset) =
+  if space == "constant"
+  then error "TODO check the pcode spec for branch"
+  else
+    if space == "" --TODO what is the other special one?
+    then error "TODO check spec"
+    else error $ "Branch with unexpected space: " ++ space
+branchTarget inst@(PInst maddr (CBRANCH _condition (VarNode space vnoffset length)) pioffset) =
+  error "TODO"
+branchTarget inst@(PInst maddr (CALL (VarNode space vnoffset length)) pioffset) =
+  error "TODO"
 
--- TODO do we want this to match the dump like others?
-instance Show FuncBlock where
-  show (FuncBlock name blocks) =
-    name ++ "\n" ++ (concat $ map ((++"\n") . show) blocks)
+type PIStream = [PInst]
 
--- Big blocks, use Data.Text
---
--- TODO this produces unanalyzed funcblocks. Make that a type difference?
-fromPrintedFuncBlock :: Text -> Maybe FuncBlock
-fromPrintedFuncBlock text =
-  let lines = splitOn (pack "\n") text
-      mname = stripPrefix "FUNCTION\t\t" $ unpack $ head lines
-      body = tail lines
-      listmPInst = map (fromPrintedPInst . unpack) body
-      listmaybetomaybelist [] = Just []
-      listmaybetomaybelist (x:xs) = case x of
-        Nothing -> Nothing
-        Just a -> case listmaybetomaybelist xs of
-          Nothing -> Nothing
-          Just as -> Just (a:as)
-      -- This function is by ChatGPT. Looks like there ought to be a
-      -- monad solution, but I can't find one.
+data PBlock = PBlock {
+  id :: Integer,
+  stream :: [PInst]
+  }
+  {- ^ These are a contiguous stream of instructions that we think are
+ probably atomic with respect to clontrol flow. they have ids to talk
+ about them indirectly. An id is a reference to the block starting at
+ the associated instruction, though that mapping may be arbitary. This
+ matters if you decide laters to split a block. The new block before
+ the split should keep the same id, and the block after should get a
+ new one. -}
+
+terminating :: PBlock -> PInst
+initial :: PBlock -> PInst
+-- ^ just for readability and avoiding unwrapping
+terminating (PBlock _id stream) = last stream
+initial (PBlock _id stream) = head stream
+
+data PBlockSeq = PBlockSeq {
+  blocks :: [PBlock],
+  pBSeqNextId :: Integer
+  }
+-- ^ Sequences of this type are expected to keep blocks in program order.
+
+findByHead :: PBlockSeq -> PAddr -> Maybe Integer
+-- ^ Just id of matching block in this seq, or Nothing if there isn't
+-- one in this seq
+findByHead (PBlockSeq blocks _) testAddr =
+          (find (((flip at) testAddr) . initial)
+            blocks) >>= (\(PBlock id _) -> Just id)
+
+data TargetExcuse =
+  Unanalyzed
+  | Indirect
+  | UncondNeedSplit PAddr
+  | CondNeedSplit PAddr Integer --with fallthrough id for CBRANCH
+  -- ^ These are a mix of shorterm and long term excuses, but we need
+  -- them to be together, since they can be discovered at the same
+  -- time
+
+data Sucessor =
+  Fallthrough Integer
+  | UncondTarget Integer
+  | CondTarget Integer Integer -- target, then fallthrough
+  | IndirectSet [Integer]      -- TODO will we ever use this?
+
+data CFGBlock = CFGBlock {
+  block :: PBlock,
+  dom :: Either TargetExcuse Sucessor -- ^ IDS of blocks in the same graph that this dominates
+  }
+  {- ^ A single node in a CFG for a single function -}
+
+selfId :: CFGBlock -> Integer
+-- ^ Saves you unwrapping. Might not be necessary
+selfId (CFGBlock (PBlock id _) _) = id
+
+splitBlock :: Integer -> PAddr -> PBlock -> Maybe (PBlock, PBlock)
+-- ^ Split the Block at the given address, and return the truncated
+-- original and the new successor, with the given Id. Or don't, if
+-- that PAddr isn't in this block.
+splitBlock nid target (PBlock oid bstream) =
+  let (before, after) = break ((== target) . location) bstream
   in
-    case listmaybetomaybelist listmPInst of
-      Nothing -> Nothing
-      Just lp -> case mname of
-        Nothing -> Nothing
-        Just name -> Just $ FuncBlock name $ [PBlock lp]
+    if null after
+    then
+      Nothing
+    else
+      Just (
+           PBlock oid before,
+           PBlock nid after
+           )
+
+splitBlockInList :: Integer -> PAddr -> [PBlock] -> Maybe [PBlock]
+-- ^ Same thing, but just traverse the list for it and return the
+-- replcaement list if possible. Nothing if the address doesn't match
+-- anything
+splitBlockInList nid target blockList =
+  let (beforeAndCurrent, after) = break ((/= LT) . (comparePAddr target) . location . initial) blockList
+      toSplit = last beforeAndCurrent
+      prior = init beforeAndCurrent
+  in
+    if null beforeAndCurrent
+    then
+      Nothing
+    else
+      (splitBlock nid target toSplit) >>= (\(a,b) -> Just [a,b]) >>= (\newEntryList -> Just $ concat [prior, newEntryList, after])
+
+
+splitCFGB :: Integer -> PAddr -> CFGBlock -> Maybe (CFGBlock, CFGBlock)
+-- ^ Lift a block split to work on nodes. The later block inherits the
+-- dominated blocks of the prior, and the prior gets just the later as
+-- a fallthrough.
+splitCFGB nid target (CFGBlock oblock odom) =
+  (splitBlock nid target oblock) >>= (\(a,b) ->
+                                        Just (
+                                         CFGBlock a (Right (Fallthrough nid)),
+                                         CFGBlock b odom
+                                         ))
+
+splitCFGBInList :: Integer -> PAddr -> [CFGBlock] -> Maybe [CFGBlock]
+-- ^ Same thing, but just traverse the list for it and return the
+-- replcaement list if possible Nothing if the address doesn't match
+-- anything
+splitCFGBInList nid target nodeList =
+  let (beforeAndCurrent, after) = break ((/= LT) . (comparePAddr target) . location . initial . block) nodeList
+      toSplit = last beforeAndCurrent
+      prior = init beforeAndCurrent
+  in
+    if null beforeAndCurrent
+    then
+      Nothing
+    else
+      (splitCFGB nid target toSplit) >>= (\(a,b) -> Just [a,b]) >>= (\newEntryList -> Just $ concat [prior, newEntryList, after])
+
+
+data CFG = CFG {
+  nodes :: [CFGBlock],
+  cFGNextId :: Integer
+  }
 
 
 
-
--- -------------------------------------------------------------------
--- Machine operations.
---
--- Simply groupings of Pcode operations. There can be internal pcode
--- relative control flow, but this is the granularity of machine
--- visible branches. So control flow graphs may not respect these
--- divisions, as a conditional branch that optionally sets things like
--- control registers may have a branch POpt in a non-tail position.
---
--- TODO test that claim
---
--- Unclear how useful this is, but it's an interesting and possibly
--- insightful semantic division.
-
--- Single Machine instruction. An sequence of PCode
--- Operations. Information like location are not internal.
--- data MOpt = [POpt]
