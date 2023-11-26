@@ -1,25 +1,17 @@
--- This file should have types that will be of general use
+-- This file defines the PCode module. It's small and is limited to
+-- (roughly) the units that the P-code spec cares about. Notably
+-- sequences of instructions and CFGs are not here, but in the
+-- analysis module instead.
 
--- TODO make this a nice list with shadowing ( but I also want all the POpt constructors)
 module PCode where
 
-import Numeric (showHex)
-import Data.Text (Text, pack, unpack, empty, strip, splitOn)
-import Data.Text.Read (decimal, hexadecimal)
-import Data.List (elemIndex, stripPrefix, find)
-import Data.Either (fromRight)
-import Debug.Trace (trace)
--- import Data.Matrix
-
-
-
--- (Address Space Id, offset (signed for constants), Length/Size)
--- Length should always be >= 0 I think
 data VarNode = VarNode {
   addrSpace :: String,
   vnOffset :: Integer,
   vnLength :: Integer
   } deriving (Show, Read)
+-- ^ (Address Space Id, offset (signed for constants), Length/Size)
+-- Length should always be >= 0 I think
 
 -- -------------------------------------------------------------------
 -- Pcode operations.
@@ -30,8 +22,7 @@ data VarNode = VarNode {
 -- See the reference, the formal semantics, or my writeup for what
 -- they do.
 
-
--- Type for a single Pcode instruction.
+-- Type for a single Pcode operation.
 data POpt =
   COPY VarNode VarNode |
   INT_ADD VarNode VarNode VarNode |
@@ -94,23 +85,40 @@ data POpt =
   BOOL_AND VarNode VarNode VarNode |
   POPCOUNT VarNode VarNode
   deriving (Show, Read)
-
--- These Shouldn't appear in raw pcode
+-- These shouldn't appear in raw pcode
 -- data CPOOLREF = -- variadic
 -- data NEW = -- variadic
 -- data USERDEFINED = -- variadic
 
--- A Machine address, a Pcode operation and the index of said
--- operation inside the machine instruction. This encoding allows for
--- operation on sequences of this type without data loss.
---
--- (machine addr, Opt, P-code offset)
 data PInst = PInst {
   maddr :: Integer,
-  opt :: POpt,
-  pIOffset :: Integer
+  pIOffset :: Integer,
+  opt :: POpt
   } deriving (Show, Read)
+-- ^ A Machine address, the index of the operation inside the machine
+-- instruction, and a Pcode operation. This encoding allows for
+-- operation on sequences of this type without data loss.
 
+controlFlowP :: PInst -> Bool
+-- ^ Is this instruction a control flow instruction?
+controlFlowP (PInst _ _ popt) =
+          case popt of
+            BRANCH _ -> True
+            CBRANCH _ _ -> True
+            BRANCHIND _ -> True
+            CALL _ -> True
+            CALLIND _ -> True
+            RETURN _ -> True
+            otherwise -> False
+
+indirectP :: PInst -> Bool
+-- ^ Does this instruction have runtime calculated control flow targets?
+indirectP (PInst _ _ popt) =
+          case popt of
+            BRANCHIND _ -> True
+            CALLIND _ -> True
+            RETURN _ -> True
+            otherwise -> False
 
 type PAddr = (Integer, Integer)
 -- ^ Readability, (maddr, offset) pair
@@ -125,11 +133,12 @@ comparePAddr :: PAddr -> PAddr -> Ordering
     EQ -> ap `compare` bp
 
 location :: PInst -> PAddr
-location (PInst m _ o) = (m, o)
+-- ^ Where is this instruction? readability and saved unwrapping
+location (PInst m o _) = (m, o)
 
 at :: PInst -> PAddr -> Bool
 -- ^ Is this instruction here? likely want infix for smooth reading
-at (PInst imaddr _opt ioff) (bmaddr, boff) =
+at (PInst imaddr ioff _opt) (bmaddr, boff) =
   (imaddr == bmaddr) && (ioff == boff)
 
 branchTarget :: PInst -> PAddr
@@ -137,142 +146,17 @@ branchTarget :: PInst -> PAddr
 branches. Do the discriminating between pcode relative and regular
 here. Only cares about the non-fallthrough target if there is more
 than one possible successor instruction. -}
-
--- TODO this is incomeplete, but I think we should be good? I think it
--- should be enforced at compile time?
-branchTarget inst@(PInst maddr (BRANCH (VarNode space vnoffset length)) pioffset) =
+branchTarget inst@(PInst maddr pioffset (BRANCH (VarNode space vnoffset length))) =
   if space == "constant"
   then error "TODO check the pcode spec for branch"
   else
     if space == "" --TODO what is the other special one?
     then error "TODO check spec"
     else error $ "Branch with unexpected space: " ++ space
-branchTarget inst@(PInst maddr (CBRANCH _condition (VarNode space vnoffset length)) pioffset) =
+branchTarget inst@(PInst maddr pioffset (CBRANCH _condition (VarNode space vnoffset length))) =
   error "TODO"
-branchTarget inst@(PInst maddr (CALL (VarNode space vnoffset length)) pioffset) =
+branchTarget inst@(PInst maddr pioffset (CALL (VarNode space vnoffset length))) =
   error "TODO"
-
-type PIStream = [PInst]
-
-data PBlock = PBlock {
-  id :: Integer,
-  stream :: [PInst]
-  }
-  {- ^ These are a contiguous stream of instructions that we think are
- probably atomic with respect to clontrol flow. they have ids to talk
- about them indirectly. An id is a reference to the block starting at
- the associated instruction, though that mapping may be arbitary. This
- matters if you decide laters to split a block. The new block before
- the split should keep the same id, and the block after should get a
- new one. -}
-
-terminating :: PBlock -> PInst
-initial :: PBlock -> PInst
--- ^ just for readability and avoiding unwrapping
-terminating (PBlock _id stream) = last stream
-initial (PBlock _id stream) = head stream
-
-data PBlockSeq = PBlockSeq {
-  blocks :: [PBlock],
-  pBSeqNextId :: Integer
-  }
--- ^ Sequences of this type are expected to keep blocks in program order.
-
-findByHead :: PBlockSeq -> PAddr -> Maybe Integer
--- ^ Just id of matching block in this seq, or Nothing if there isn't
--- one in this seq
-findByHead (PBlockSeq blocks _) testAddr =
-          (find (((flip at) testAddr) . initial)
-            blocks) >>= (\(PBlock id _) -> Just id)
-
-data TargetExcuse =
-  Unanalyzed
-  | Indirect
-  | UncondNeedSplit PAddr
-  | CondNeedSplit PAddr Integer --with fallthrough id for CBRANCH
-  -- ^ These are a mix of shorterm and long term excuses, but we need
-  -- them to be together, since they can be discovered at the same
-  -- time
-
-data Sucessor =
-  Fallthrough Integer
-  | UncondTarget Integer
-  | CondTarget Integer Integer -- target, then fallthrough
-  | IndirectSet [Integer]      -- TODO will we ever use this?
-
-data CFGBlock = CFGBlock {
-  block :: PBlock,
-  dom :: Either TargetExcuse Sucessor -- ^ IDS of blocks in the same graph that this dominates
-  }
-  {- ^ A single node in a CFG for a single function -}
-
-selfId :: CFGBlock -> Integer
--- ^ Saves you unwrapping. Might not be necessary
-selfId (CFGBlock (PBlock id _) _) = id
-
-splitBlock :: Integer -> PAddr -> PBlock -> Maybe (PBlock, PBlock)
--- ^ Split the Block at the given address, and return the truncated
--- original and the new successor, with the given Id. Or don't, if
--- that PAddr isn't in this block.
-splitBlock nid target (PBlock oid bstream) =
-  let (before, after) = break ((== target) . location) bstream
-  in
-    if null after
-    then
-      Nothing
-    else
-      Just (
-           PBlock oid before,
-           PBlock nid after
-           )
-
-splitBlockInList :: Integer -> PAddr -> [PBlock] -> Maybe [PBlock]
--- ^ Same thing, but just traverse the list for it and return the
--- replcaement list if possible. Nothing if the address doesn't match
--- anything
-splitBlockInList nid target blockList =
-  let (beforeAndCurrent, after) = break ((/= LT) . (comparePAddr target) . location . initial) blockList
-      toSplit = last beforeAndCurrent
-      prior = init beforeAndCurrent
-  in
-    if null beforeAndCurrent
-    then
-      Nothing
-    else
-      (splitBlock nid target toSplit) >>= (\(a,b) -> Just [a,b]) >>= (\newEntryList -> Just $ concat [prior, newEntryList, after])
-
-
-splitCFGB :: Integer -> PAddr -> CFGBlock -> Maybe (CFGBlock, CFGBlock)
--- ^ Lift a block split to work on nodes. The later block inherits the
--- dominated blocks of the prior, and the prior gets just the later as
--- a fallthrough.
-splitCFGB nid target (CFGBlock oblock odom) =
-  (splitBlock nid target oblock) >>= (\(a,b) ->
-                                        Just (
-                                         CFGBlock a (Right (Fallthrough nid)),
-                                         CFGBlock b odom
-                                         ))
-
-splitCFGBInList :: Integer -> PAddr -> [CFGBlock] -> Maybe [CFGBlock]
--- ^ Same thing, but just traverse the list for it and return the
--- replcaement list if possible Nothing if the address doesn't match
--- anything
-splitCFGBInList nid target nodeList =
-  let (beforeAndCurrent, after) = break ((/= LT) . (comparePAddr target) . location . initial . block) nodeList
-      toSplit = last beforeAndCurrent
-      prior = init beforeAndCurrent
-  in
-    if null beforeAndCurrent
-    then
-      Nothing
-    else
-      (splitCFGB nid target toSplit) >>= (\(a,b) -> Just [a,b]) >>= (\newEntryList -> Just $ concat [prior, newEntryList, after])
-
-
-data CFG = CFG {
-  nodes :: [CFGBlock],
-  cFGNextId :: Integer
-  }
-
-
+-- TODO this is incomeplete, but I think we should be good? I think it
+-- should be enforced at compile time?
 
