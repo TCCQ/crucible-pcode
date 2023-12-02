@@ -20,7 +20,9 @@ type PIStream = [PInst]
 
 data PBlock = PBlock {
   id :: Integer,
-  stream :: [PInst]
+  stream :: [PInst],
+  ghidraIsFunctionHead :: Bool,
+  ghidraName :: Maybe String
   }
 {- ^ These are a contiguous stream of instructions that we think are
  probably atomic with respect to clontrol flow. they have ids to talk
@@ -28,27 +30,29 @@ data PBlock = PBlock {
  the associated instruction, though that mapping may be arbitary. This
  matters if you decide laters to split a block. The new block before
  the split should keep the same id, and the block after should get a
- new one. -}
+ new one. They also have some info carried in from ghidra, namely the
+ name of the block, if it is associated with a label, and whether
+ ghidra thinks this block is the start of a function.-}
 
 terminating :: PBlock -> PInst
 initial :: PBlock -> PInst
 -- ^ just for readability and avoiding unwrapping
-terminating (PBlock _id stream) = last stream
-initial (PBlock _id stream) = head stream
+terminating (PBlock _id stream _ _) = last stream
+initial (PBlock _id stream _ _) = head stream
 
 splitBlock :: Integer -> PAddr -> PBlock -> Maybe (PBlock, PBlock)
 -- ^ Split the Block at the given address, and return the truncated
 -- original and the new successor, with the given id. Or don't, if
 -- that PAddr isn't in this block.
-splitBlock nid target (PBlock oid bstream) =
+splitBlock nid target (PBlock oid bstream func name) =
   let (before, after) = break ((== target) . location) bstream
   in
     if null after
     then
       Nothing
     else
-      Just (PBlock oid before,
-            PBlock nid after)
+      Just (PBlock oid before func name,
+            PBlock nid after False Nothing)
 
 splitBlockInList :: Integer -> PAddr -> [PBlock] -> Maybe [PBlock]
 -- ^ Same thing, but just traverse the list for it and return the
@@ -84,7 +88,7 @@ findByHead :: PBlockSeq -> PAddr -> Maybe Integer
 -- or Nothing if there isn't one in this seq
 findByHead (PBlockSeq blocks _) testAddr =
           (find (((flip at) testAddr) . initial)
-            blocks) >>= (\(PBlock id _) -> Just id)
+            blocks) >>= (\(PBlock id _ _ _) -> Just id)
 
 -- -------------------------------------------------------------------
 --
@@ -149,7 +153,11 @@ splitCFGBInList nid target nodeList =
 
 data CFG = CFG {
   nodes :: [CFGBlock],
-  cFGNextId :: Integer -- the first unused id, for use when splitting nodes
+  cfgNextId :: Integer, -- the first unused id, for use when splitting nodes
+  cfgIsStable :: Bool   -- True if it is safe to assume that all
+                        -- control flow paths have been discovered. We
+                        -- can do non-reversable and other nastier
+                        -- transformations and analysis
   }
 -- ^ A (likely) connected set of blocks seperated by control flow
 -- instructions or control flow targets.
@@ -162,21 +170,23 @@ data CFG = CFG {
 --
 -- Build the augmented types by doing analysis along the way
 
-terminatingInstSplit :: PIStream -> PBlockSeq
--- ^ Split into blocks that end with a control flow
--- instruction. Returns the blocks and the first unused id number
-terminatingInstSplit stream =
-  uncurry PBlockSeq $ tis' stream 0
-  where tis' :: PIStream -> Integer-> ([PBlock], Integer)
-        tis' strm free =
-          if null strm
-          then
-            ([], free) -- ^ base case
-          else
-            let (first, cf:rest) = break controlFlowP strm
-                (tailL, unusedId) = tis' rest (free + 1)
-            in
-              ((PBlock free first):tailL, unusedId)
+-- terminatingInstSplit :: PIStream -> PBlockSeq
+-- -- ^ Split into blocks that end with a control flow
+-- -- instruction. Returns the blocks and the first unused id number
+-- terminatingInstSplit stream =
+--   uncurry PBlockSeq $ tis' stream 0
+--   where tis' :: PIStream -> Integer-> ([PBlock], Integer)
+--         tis' strm free =
+--           if null strm
+--           then
+--             ([], free) -- ^ base case
+--           else
+--             let (first, cf:rest) = break controlFlowP strm
+--                 (tailL, unusedId) = tis' rest (free + 1)
+--             in
+--               ((PBlock free first False Nothing):tailL, unusedId)
+
+-- TODO we need a way to read in a PBlockSeq based on the dumping script
 
 -- TODO v This function is really really messy. That's because it
 -- basically doesn't have any easily broken off subroutines, and while
@@ -197,7 +207,7 @@ linkCFG seq@(PBlockSeq rawBlockStream unusedId) prefix =
   if null rawBlockStream
   then
     -- base case. No more blocks to analyze
-    CFG prefix unusedId
+    CFG prefix unusedId False
   else
     -- TODO could this let block be partially a where block? I need
     -- that null check for safety, but laziness might make it work
@@ -215,7 +225,7 @@ linkCFG seq@(PBlockSeq rawBlockStream unusedId) prefix =
                       CALL _ -> single
                       CBRANCH _ _ ->
                         case blockStream of
-                          (PBlock nextId _):_rest ->
+                          (PBlock nextId _ _ _):_rest ->
                             -- there is some next block
                             case findByHead seq target of
                               Just targetId -> Right (CondTarget targetId nextId)
@@ -266,7 +276,20 @@ initialGraph :: PBlockSeq -> CFG
 -- addresses.
 initialGraph seq@(PBlockSeq blocks unusedId) = linkCFG seq []
 
-
+cfgCommitNonIndirect :: CFG -> CFG
+-- ^ Sets the stable flag in the event that this CFG has no non-return
+-- indirect jumps. Does nothing if flag is already set
+cfgCommitNonIndirect input@(CFG blocks id stable) =
+  if stable
+  then
+    input
+  else
+    CFG blocks id $ foldr (\rightBlock leftValue ->
+                             leftValue || (isInd . terminating) rightBlock) False $ map block blocks -- just pull the PBlock out of each CFGBlock
+  where
+    isInd (PInst _ _ (BRANCHIND _)) = True
+    isInd (PInst _ _ (CALLIND _)) = True
+    isInd (PInst _ _ _) = False
 
 -- TODO not sure where to put this, but currently I am working under
 -- the assumption that the initial block seq that is passed in for the
