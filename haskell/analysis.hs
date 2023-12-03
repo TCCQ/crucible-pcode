@@ -170,6 +170,9 @@ data CFG = CFG {
 --
 -- Build the augmented types by doing analysis along the way
 
+-- TODO do I still need this? I think so, but I don't recall why I
+-- commented it.
+
 -- terminatingInstSplit :: PIStream -> PBlockSeq
 -- -- ^ Split into blocks that end with a control flow
 -- -- instruction. Returns the blocks and the first unused id number
@@ -294,7 +297,69 @@ cfgCommitNonIndirect input@(CFG blocks id stable) =
 -- TODO not sure where to put this, but currently I am working under
 -- the assumption that the initial block seq that is passed in for the
 -- CFG first pass is of ALL the functions, since a call will basically
--- always take you out of the current function. Thus we should have
--- another pass after the initial CFG pass to mark which blocks are
--- the heads of functions and which aren't. Note that we have that
--- info from the dump, but currently it is being ignored.
+-- always take you out of the current function.
+--
+-- We are plumbing the function info through now, but the idea of
+-- doing this parsing at the function scale is very desirable. We need
+-- to edit the above to allow branches out of the current CFG, and we
+-- should pull that info to the top of the CFG I think. So each
+-- function CFG is itself a node of a function level CFG. Doing the
+-- whole program in one giant CFG is tempting, but will exascerbate
+-- the problems we will have with indirect control flow I think,
+-- particularly returns.
+
+
+-- -------------------------------------------------------------------
+-- augmented (concrete) CFGs
+--
+-- If we are confident we have a complete list of control flow
+-- locations (see cfgIsStable), then we can start with analysis,
+-- including touched/observed listings at the block level, backlinks
+-- for control flow, and immediate dominators. These are useful, but
+-- primarily needed for determining block argument detection, since we
+-- can't just translate the phi expressions. We need to re-discover
+-- which things need to be arugments in the cruicble arg-passing cfg
+-- style.
+
+-- TODO we need to be careful, since varnodes don't have the disjoint
+-- nature of registers. I need to check what the llvm IR's take on
+-- this problem is, but we should
+--
+-- A: eliminate subset dependencies. If I depend on a range and a
+-- subset of said range, then I either need to drop the subset, or
+-- have symbolic semantics that the subset matches t he parent range
+-- like it should, since they are the same bits. If I just drop the
+-- subset, I need to be careful about still propagating the symbolic
+-- reasoning, and still assigning down to whatever the formal arg of
+-- the subset range was. Keeping both and adding a symbolic constraint
+-- might be better.
+--
+-- B: Do collision detection during touch/observe accumulation with
+-- ranges instead of direct comparison.
+
+data ACFGBlock = ACFGBlock {
+  acfgId :: Integer
+  acfgBlock :: PBlock, -- TODO this naming scheme sucks. Make a better one
+  acfgPreds :: [Integer],
+  acfgSuccs :: Sucessor, -- distinguish what kind of downlinks these are, and to where
+  acfgObserves :: [VarNode],
+  acfgTouches :: [VarNode],
+  acfgImmDomBy :: Maybe Integer -- closest stricting dominating node.
+  }
+
+-- TODO careful during touch/observe accumulation to include self as a
+-- block if there is a loop that contains the current block.
+
+-- Since the cfg is concrete, and downlinks are annotated, we can
+-- discard program order, and store blocks in id order, so we can do
+-- constant time lookup.
+--
+-- TODO when I feed into crucible, does that have to be in program
+-- order? How can I teach crucible about the weirdness of pcode
+-- addresses? Do I need to?
+data AugCFG = AugCFG {
+  acfgSize :: Integer,
+  acfgBlockList :: [ACFGBlock], --of length matching size
+  acfgEntries :: [Integer]      --places execution can begin
+  }
+-- No way we are constructing all of this in one pass, so we will do it in steps
