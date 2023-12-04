@@ -19,7 +19,7 @@ type PIStream = [PInst]
 -- ^ Slightly more readable function types
 
 data PBlock = PBlock {
-  id :: Integer,
+  pBlockId :: Integer,
   stream :: [PInst],
   ghidraIsFunctionHead :: Bool,
   ghidraName :: Maybe String
@@ -109,7 +109,7 @@ data TargetExcuse =
   -- them to be together, since they can be discovered at the same
   -- time.
 
-data Sucessor =
+data Successor =
   Fallthrough Integer
   | UncondTarget Integer
   | CondTarget Integer Integer -- target, then fallthrough
@@ -121,7 +121,7 @@ data Sucessor =
 
 data CFGBlock = CFGBlock {
   block :: PBlock,
-  dom :: Either TargetExcuse Sucessor -- ^ IDS of blocks in the same graph that this dominates
+  succ :: Either TargetExcuse Successor -- ^ IDS of blocks in the same graph that this dominates
   }
   {- ^ A single node in a CFG -}
 
@@ -129,11 +129,11 @@ splitCFGB :: Integer -> PAddr -> CFGBlock -> Maybe (CFGBlock, CFGBlock)
 -- ^ Lift a block split to work on nodes. The later block inherits the
 -- dominated blocks of the prior, and the prior gets just the later as
 -- a fallthrough.
-splitCFGB nid target (CFGBlock oblock odom) =
+splitCFGB nid target (CFGBlock oblock osucc) =
   (splitBlock nid target oblock) >>= (\(a,b) ->
                                         Just (
                                          CFGBlock a (Right (Fallthrough nid)),
-                                         CFGBlock b odom
+                                         CFGBlock b osucc
                                          ))
 
 splitCFGBInList :: Integer -> PAddr -> [CFGBlock] -> Maybe [CFGBlock]
@@ -157,7 +157,8 @@ data CFG = CFG {
   cfgIsStable :: Bool   -- True if it is safe to assume that all
                         -- control flow paths have been discovered. We
                         -- can do non-reversable and other nastier
-                        -- transformations and analysis
+                        -- transformations and analysis. This means
+                        -- that all successors are non-excuses.
   }
 -- ^ A (likely) connected set of blocks seperated by control flow
 -- instructions or control flow targets.
@@ -307,6 +308,12 @@ cfgCommitNonIndirect input@(CFG blocks id stable) =
 -- whole program in one giant CFG is tempting, but will exascerbate
 -- the problems we will have with indirect control flow I think,
 -- particularly returns.
+--
+-- The way to do this in my opinion is turn ids from an Integer to
+-- somethink like `Internal Integer | External PAddr`. That way it's
+-- still fully analyzed (ie no room for indirection nonsense), but
+-- gives enough info to sew it back together if you have the acfg that
+-- the target it in.
 
 
 -- -------------------------------------------------------------------
@@ -337,9 +344,9 @@ cfgCommitNonIndirect input@(CFG blocks id stable) =
 -- B: Do collision detection during touch/observe accumulation with
 -- ranges instead of direct comparison.
 
+-- TODO is this worth rewriting with lenses, or explicit setters?
 data ACFGBlock = ACFGBlock {
-  acfgId :: Integer
-  acfgBlock :: PBlock, -- TODO this naming scheme sucks. Make a better one
+  acfgBlock :: PBlock,
   acfgPreds :: [Integer],
   acfgSuccs :: Sucessor, -- distinguish what kind of downlinks these are, and to where
   acfgObserves :: [VarNode],
@@ -347,8 +354,8 @@ data ACFGBlock = ACFGBlock {
   acfgImmDomBy :: Maybe Integer -- closest stricting dominating node.
   }
 
--- TODO careful during touch/observe accumulation to include self as a
--- block if there is a loop that contains the current block.
+-- TODO careful during touch/observe conflict accumulation to include
+-- self as a block if there is a loop that contains the current block.
 
 -- Since the cfg is concrete, and downlinks are annotated, we can
 -- discard program order, and store blocks in id order, so we can do
@@ -363,3 +370,99 @@ data AugCFG = AugCFG {
   acfgEntries :: [Integer]      --places execution can begin
   }
 -- No way we are constructing all of this in one pass, so we will do it in steps
+
+acfgBlockId :: ACFGBlock -> Integer
+-- ^ save unwrapping
+acfgBlockId (ACFGBlock block _ _ _ _ _) = pBlockId block
+
+basicACFGBlockTranslate :: CFGBlock -> ACFGBlock
+-- ^ Just get us into the right type. Leave new fields empty.
+basicACFGBlockTranslate (CFGBlock block succ) =
+  ACFGBlock block [] succ [] [] Nothing
+
+-- TODO ok so this is correct, but leads to vast overestimates of
+-- connectedness, since a block that writes and then reads the same
+-- location will still have that location marked as a
+-- observation. This is hugely undesirable.
+--
+-- We can solve that with intersection analysis and eliminate
+-- observations that are subsets of prior touches. We probably want to
+-- build some kind of interval tree, but we also need to care about
+-- address spaces, (one per should be fine?) and temporal ordering
+-- (mark at node, again not undoable)
+acfgBlockAccumulateEffects :: ACFGBlock -> ACFGBlock
+-- ^ Populate the observes and touches fields
+acfgBlockAccumulateEffects (ACFGBlock pblock@(PBlock _id instList _ _) pred succ _ _ im) =
+  let (oList, tList) = foldr (combine . opt) ([], []) instList
+  in
+    -- note that these lists are still backwards. If you want them to
+    -- be minimal, like the todo above suggests, or do other
+    -- processing, that should happen here rather than later.
+    ACFGBlock pblock pred succ olist tList im
+  where combine popt (obsList, touchList) =
+          -- with foldr, produces a pair of lists for o/t'd varnodes
+          -- in reverse order from the current block
+          ((observes popt):obsList, (touches popt):touchList)
+
+putInIdOrder :: [CFGBlock] -> [CFGBlock]
+-- ^ Just sorts based on id. You should have a list from id zero to
+-- length-1, but I won't be explicitly checking that.
+putInIdOrder cfgBList =
+  sortBy (compare . pBlockId . block) cfgBList
+
+populateBackLinks [ACFGBlock] -> [ACFGBlock]
+-- ^ Do an update pass over the blocks, populating the reverse cfg
+-- edges
+populateBackLinks aList =
+  pbl [] aList
+  where pbl before after =
+          if null after
+          then before
+          else
+            -- take head of after, and update each target
+            let cur = head after
+                curId = acfgBlockId cur
+                ids = sort $ case acfgSuccs cur of
+                               Fallthrough id -> [id]
+                               UncondTarget id -> [id]
+                               CondTarget id1 id2 -> [id1, id2]
+                               IndirectSet idSet -> idSet
+            in
+              -- TODO we can skip before if ((head ids) > curId)
+              -- should be doable with monads, but either is backwards
+              -- here
+              case updateInList before ids curId of
+                Right newBefore -> newBefore ++ after
+                Left remainingKeys ->
+                  case updateInList after ids curId of
+                    Right newAfter -> before ++ newAfter
+                    Left ->
+                      error $ "id successor out of acfg in populateBackLinks: " ++ (show curId)
+        updateInList alist keyList curId =
+          -- both sorted
+          if null alist
+          then Left keyList
+          else
+            if null keyList
+            then
+              Right alist
+            else
+                let h = head alist
+                    k = head keyList
+                in
+                  case compare (acfgBlockId h) k of
+                    LT -> (updateInList (tail alist) keyList curId) >>=
+                      (\ tailL -> Right (h:tailL))
+                    EQ -> (updateInList (tail alist) (tail keyList) curId) >>=
+                      (\ tailL -> Right ((appendPred h curId):tailL))
+                    GT -> error $ "Are you missing ids? greater than between sorted list heads in populateBackLinks: " ++ (show k)
+        appendPred (ACFGBlock b predL s o t i) id =
+          ACFGBlock p id:predL s o t i
+
+-- TODO next:
+--
+-- alg 430 version to do Immediate dominator marking
+-- block arg reconstruction (interval analysis? or just overestimate? See Prior TODO)
+-- data type for blocks with formal args?
+-- pipeline functions
+-- CFG -> ACFG -> block_arg'd_cfg
