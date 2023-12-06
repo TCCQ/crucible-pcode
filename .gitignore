@@ -7,4 +7,5 @@
 *.toc
 *.o
 *.hi
+*TAGS
 haskell/main
