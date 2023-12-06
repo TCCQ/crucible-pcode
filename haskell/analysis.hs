@@ -5,6 +5,7 @@
 module Analysis where
 
 import Data.List (find)
+import Data.Set
 
 import PCode
 
@@ -118,6 +119,13 @@ data Successor =
   -- nodes are immediately dominated. This type singals completed
   -- analysis for the sucessors of the associated node, otherwise use
   -- TargetExcuse
+
+intoList :: Successor -> [Integer]
+intoList (Fallthrough fallthrough) = [fallthrough]
+intoList (UncondTarget target) = [target]
+intoList (CondTarget target fallthrough) = [target, fallthrough]
+intoList (IndirectSet indList) = indList
+
 
 data CFGBlock = CFGBlock {
   block :: PBlock,
@@ -366,7 +374,7 @@ data ACFGBlock = ACFGBlock {
 -- addresses? Do I need to?
 data AugCFG = AugCFG {
   acfgSize :: Integer,
-  acfgBlockList :: [ACFGBlock], --of length matching size
+  acfgBlockList :: [ACFGBlock], --of length matching size, in id order
   acfgEntries :: [Integer]      --places execution can begin
   }
 -- No way we are constructing all of this in one pass, so we will do it in steps
@@ -374,6 +382,12 @@ data AugCFG = AugCFG {
 acfgBlockId :: ACFGBlock -> Integer
 -- ^ save unwrapping
 acfgBlockId (ACFGBlock block _ _ _ _ _) = pBlockId block
+
+putInIdOrder :: [CFGBlock] -> [CFGBlock]
+-- ^ Just sorts based on id. You should have a list from id zero to
+-- length-1, but I won't be explicitly checking that.
+putInIdOrder cfgBList =
+  sortBy (compare . pBlockId . block) cfgBList
 
 basicACFGBlockTranslate :: CFGBlock -> ACFGBlock
 -- ^ Just get us into the right type. Leave new fields empty.
@@ -403,12 +417,6 @@ acfgBlockAccumulateEffects (ACFGBlock pblock@(PBlock _id instList _ _) pred succ
           -- with foldr, produces a pair of lists for o/t'd varnodes
           -- in reverse order from the current block
           ((observes popt):obsList, (touches popt):touchList)
-
-putInIdOrder :: [CFGBlock] -> [CFGBlock]
--- ^ Just sorts based on id. You should have a list from id zero to
--- length-1, but I won't be explicitly checking that.
-putInIdOrder cfgBList =
-  sortBy (compare . pBlockId . block) cfgBList
 
 populateBackLinks [ACFGBlock] -> [ACFGBlock]
 -- ^ Do an update pass over the blocks, populating the reverse cfg
@@ -459,10 +467,89 @@ populateBackLinks aList =
         appendPred (ACFGBlock b predL s o t i) id =
           ACFGBlock p id:predL s o t i
 
+
+-- internal data type for ImmDom discovery alg
+data MarkedACFGB = MarkedACFGB ACFGBlock Maybe Integer
+
+getMarkedBlockIndex (MarkedACFGB b _) = acfgBlockId b
+mark (MarkedACFGB b _) id = MarkedACFGB b $ Just id
+unmark (MarkedACFGB b _) = MarkedACFGB b Nothing
+marked (MarkedACFGB _ m) = isJust m
+markedWith (MarkedACFGB _ Just id) tid = id == tid
+markedWith (MarkedACFGB _ Nothing) = False
+
+-- TODO make these dfses strict? thunk buildup vs stack buildup
+markWithFrom :: Integer -> Integer -> [MarkedACFGB] -> [MarkedACFGB]
+markWithFrom markId srcId bl =
+    -- recursive dfs from src, marking with markId returns new
+    -- blocklist. Arg order to facilitate a slick foldr during
+    -- the recursive step. Relies on sorted order
+    let current = bl !! srcId
+        succList = intoList succs
+        listWithMark = (take srcId bl) ++ $ (mark current markId) ++ drop (srcId + 1) bl
+    in
+    if not . markedWith markId $ current
+    then
+        -- needs marking
+        foldr (markWithFrom markId) listWithMark succList
+        -- run again with one step down from src node, composing the effects of running on each successor
+    else
+        -- is already marked, this is the base case
+        bl
+unmarkExcludeFrom :: Integer -> Integer -> [MarkedACFGB] -> [MarkedACFGB]
+unmarkExcludeFrom excId srcId bl =
+    -- recursive dfs, unmarking found nodes back to prior
+    -- imdom. Returns new blocklist. prunes paths that go
+    -- through excId's node
+    let current = bl !! srcId
+        succList = intoList succs
+        listWithUnmark = (take srcId bl) ++ $ (unmark current) ++ drop (srcId + 1) bl
+    in
+    if not . marked $ current || getMarkedBlockIndex current == excId
+    then
+        -- prune this branch, or already reached
+        bl
+    else
+        -- reachable with w/o exclude path, unmark
+        foldr (unmarkExcludeFrom excId) listWithUnmark succList
+
+alg430 :: [MarkedACFGB]
+       -> Set Integer
+       -> [Integer]
+       -> [MarkedACFGB]
+-- ^ Nice recursive bfs. O(n^2) I think. Based on
+-- https://dl.acm.org/doi/epdf/10.1145/361532.361566
+alg430 graph seen queue =
+  if null queue
+  then graph -- done!
+  else
+    let current = head queue
+    in
+      if member current seen
+      then alg430 graph seen $ tail queue
+      else
+        -- new node, do actual work
+        let transRule = (markWithFrom current current) . (unmarkExcludeFrom current current)
+            -- [MarkedACFGB] -> [MarkedACFGB]
+        in
+          alg430 (transRule graph) (insert current seen) $ tail queue
+
+populateImmDomBy :: AugCFG -> AugCFG
+-- ^ Runs a version of alg 430 that marks the immediate dominator of
+-- each node. Note that Nothing is still a valid value, since some
+-- nodes (like entry nodes) don't have one.
+populateImmDomBy (AugCFG size blockList entryIdList) =
+  let wrappedWithMarks = map (\b -> MarkedACFGB b Nothing) blockList
+  in
+    AugCFG size (map commitImDom (alg430 wrappedWithMarks empty entryIdList)) entryIdList
+  where commitImDom = \(MarkedACFGB (ACFGBlock b p s o t _i) im) ->
+          ACFGBlock b p s o t im
+
+
+
 -- TODO next:
 --
--- alg 430 version to do Immediate dominator marking
 -- block arg reconstruction (interval analysis? or just overestimate? See Prior TODO)
 -- data type for blocks with formal args?
--- pipeline functions
+-- pipeline functions:
 -- CFG -> ACFG -> block_arg'd_cfg
