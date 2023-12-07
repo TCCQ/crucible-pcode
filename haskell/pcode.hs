@@ -9,9 +9,62 @@ data VarNode = VarNode {
   addrSpace :: String,
   vnOffset :: Integer,
   vnLength :: Integer
-  } deriving (Show, Read)
+  } deriving (Show, Read, Eq)
 -- ^ (Address Space Id, offset (signed for constants), Length/Size)
 -- Length should always be >= 0 I think
+
+intersect :: VarNode -> VarNode -> Maybe VarNode
+-- ^ Commutative intersection. Local to address space.
+intersect a@(VarNode as ao al) b@(VarNode bs bo bl)
+  | a0 > b0 = intersect b a
+  | as /= bs = Nothing
+  | otherwise =
+    let ae = ao + al
+        be = bo + bl
+    in
+      if bo > ae
+      then
+        Nothing
+      else
+        Just $ VarNode as bo $ (min (ae - bo) be) - bo
+
+difference :: VarNode -> VarNode -> Maybe VarNode
+-- ^ Non-commutative difference. Gives A \ (A n B), the remainder of a
+-- after cutting out b.
+difference a@(VarNode as ao al) b@(VarNode bs bo bl)
+  | as /= bs = Nothing
+  | otherwise =
+    Just VarNode as ao $ (min (ao + al) bo) - ao
+
+compareStart :: VarNode -> VarNode -> Maybe Ord
+-- ^ Partial order on varnodes by starting address. Only defined in
+-- the same address space
+compareStart a@(VarNode as ao al) b@(VarNode bs bo bl)
+  | as /= bs = Nothing
+  | otherwise = Just compare ao bo
+
+compareEnd :: VarNode -> VarNode -> Maybe Ord
+-- ^ Partial order on varnodes by end address. Only defined in
+-- the same address space
+compareEnd a@(VarNode as ao al) b@(VarNode bs bo bl)
+  | as /= bs = Nothing
+  | otherwise = Just compare (ao + al) (bo + bl)
+
+compareContains :: VarNode -> VarNode -> Maybe Ord
+-- ^ Partial order on varnodes by interval inclusion. A > B if A
+-- includes all of B. Only defined in the same address space.
+compareContains a b
+  | a0 > b0 = (compareContains b a) >>= (\case
+                                            GT -> Just LT
+                                            EQ -> Just EQ
+                                            LT -> error "non-symmetric < during compareContains")
+  | otherwise =
+      surrounding <$> (compareStart a b) <*> (compareEnd a b)
+  where surrounding = Just . (\cases { LT GT -> GT; EQ GT -> GT; GT GT -> LT;
+                                       LT EQ -> GT; EQ EQ -> EQ; GT EQ -> LT;
+                                       LT LT -> LT; EQ LT -> LT; GT LT -> LT})
+
+
 
 -- -------------------------------------------------------------------
 -- Pcode operations.
