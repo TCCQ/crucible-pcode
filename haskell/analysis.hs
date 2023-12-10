@@ -394,29 +394,183 @@ basicACFGBlockTranslate :: CFGBlock -> ACFGBlock
 basicACFGBlockTranslate (CFGBlock block succ) =
   ACFGBlock block [] succ [] [] Nothing
 
--- TODO ok so this is correct, but leads to vast overestimates of
--- connectedness, since a block that writes and then reads the same
--- location will still have that location marked as a
--- observation. This is hugely undesirable.
+-- TODO so this is basically an admission that I want to use the
+-- register addr space like a second memory space, since that's how
+-- pcode thinks about it. This, based on the difficulty / model of
+-- ram, will be quite costly and maybe will need some tooling, but I
+-- think is the way to go. I can maybe do some work and see if I can
+-- get as far as binning the registers, and then figure out what the
+-- llvm version does for subsets of registers, since that is not
+-- uncommon.
+addObserved :: [VarNode] -> [VarNode] -> VarNode -> ([VarNode], [VarNode])
+-- ^ Add a varnode to the observed list of a according to the
+-- semantics of a block-aggregate observation list. Ie. don't include
+-- a varnode that has already been written to, or one that is a direct
+-- subset of an existing one. Assumes the passed lists are in program
+-- order. Note that another pass is needed to fully eliminte some
+-- orders of redundancies.
 --
--- We can solve that with intersection analysis and eliminate
--- observations that are subsets of prior touches. We probably want to
--- build some kind of interval tree, but we also need to care about
--- address spaces, (one per should be fine?) and temporal ordering
--- (mark at node, again not undoable)
+-- O(n) in each arg
+--
+-- Touch first:
+-- Super then sub -> drop sub
+-- sub then super -> difference (TODO sure?)
+-- incomp -> inc both
+--
+-- Both observations:
+-- Superset then subset -> drop subset
+-- Subset then superset -> include both (corrected elsewhere)
+-- Incomparible pair -> include both (TODO are we sure?)
+addObserved observed touched test
+  | null observed && null touched =
+      -- no conflicts, include it
+      ([test], [])
+  | isEmpty test =
+      -- this test isn't a real dep, since it has no content, return inputs
+      (observed, touched)
+  | null observed =
+      -- we have exhausted observations, test touched next
+      let nextT = head touched
+          touchedRest = tail test
+      in
+        case compareContains test nextT of
+          Nothing ->
+            let (o,t) = addObserved [] touchedRest test
+            in
+              (o, nextT:t) -- keep going
+          Just LT ->
+            -- this is a subset, drop it, we are done, return inputs
+            ([], nextT:touchedRest)
+          Just EQ ->
+            -- eq, drop it, done, return inputs
+            ([], nextT:touchedRest)
+          Just GT ->
+            -- superset, try diff as observation
+            case difference test nextT of
+              Nothing -> -- diff address spaces, keep going
+                let (o,t,a) = addObserved [] touchedRest test
+                in
+                  (o, nextT:t)
+              Just [] -> -- test is subsumed by this touch.
+                error "difference and compareContains disagree: " ++ (show test) ++ " " ++ (show nextT)
+              Just [diff] -> -- there is some leftover observation, continue with that
+                let (o,t) = addObserved [] touchedRest diff
+                in
+                  (o, nextT:t)
+              Just [diff1, diff2] -> -- two leftovers, compose testing both
+                let (o1,t1) = addObserved [] touchedRest diff1
+                    (o2,t2) = addObserved o2 t2 diff2
+                    -- t1 should equal t2
+                in
+                  (o2, nextT:t2)
+  | otherwise =
+      -- we want to exhaust the observation list first.
+      let nextO = head observation
+          observationRest = tail observation
+      in
+        case compareContains test nextO of
+          Nothing -> -- incomparible, continue
+            let (o,t) = addObserved observationRest touched test
+            in
+              (nextO:o, t)
+          Just GT -> -- superset, include both for now, (aka continue)
+            let (o,t) = addObserved observationRest touched test
+            in
+              (nextO:o, t)
+          Just EQ -> -- dup, eliminate, return inputs
+            (nextO:observationRest, touched)
+          Just LT -> -- subset, eliminate, return inputs
+            (nextO:observationRest, touched)
+
+
+
+addTouched :: [VarNode] -> [VarNode] -> VarNode -> ([VarNode], [VarNode])
+-- ^ Add a varnode to the touched list of a according to the semantics
+-- of a block-aggregate touch list. Ie. don't include a varnode that a
+-- direct subset of an existing one. Assumes the passed lists are in
+-- program order. Note that another pass is needed to fully eliminte
+-- some orders of redundancies.
+--
+-- O(n) in second arg
+--
+-- Touch first:
+-- Super then sub -> drop sub
+-- sub then super -> inc both (corrected elsewhere)
+-- incomp -> inc both
+addTouched observed touched test =
+  | null touched =
+    (observed, [test]) -- no counter example
+  | otherwise =
+    let nextT = head touched
+        touchedRest = tail touched
+    in
+      case compareContains test nextT of
+        Nothing -> -- incomparable, continue
+          let (o,t) = addTouched observed touchedRest test
+          in
+            (o, nextT:t)
+        Just GT -> -- superset, include and filter later
+          let (o,t) = addTouched observed touchedRest test
+          in
+            (o, nextT:t)
+        Just EQ -> -- dup, eliminate, return inputs
+          (observed, touched)
+        Just LT -> -- subset, eliminate, return inputs
+          (observed, touched)
+
+eliminateSubsets :: [VarNode] -> [VarNode]
+-- ^ Eliminates any subsets of other elements. O(n^2). Only works on
+-- lists with at least two elements
+eliminateSubsets vh:vr =
+  es' [] vh vr
+   where shouldRemoveP test inList =
+           compareContains test inList == Just LT
+         shouldRemoveLP test vlist =
+           foldr ((||) (shouldRemoveP test)) vlist
+         es' [] cur later@(lh:ln:lr) =
+           if shouldRemoveLP cur later
+           then
+             es' [lh] ln lr
+           else
+             es' lh:[cur] ln lr
+         es' prior cur [] =
+           if shouldRemoveLP cur prior
+           then
+             prior
+           else
+             prior++[cur]
+         es' prior cur lh:lr =
+           if shouldRemoveLP cur prior ||
+              shouldRemoveLP cur later
+           then
+             es' prior lh lr
+           else
+             es' prior++[cur] lh lr
+
+-- TODO This should now be correct and the minimal effects, up to
+-- choices of merging adjacent varnodes and stuff. This is not a cheap
+-- operation though, since the sub/super check in observed/touched is
+-- an O(n^2) operation. We could rework with interval trees and maybe
+-- do better, but this is a startup cost, and not called
+-- interactively, so it's fine for now.
 acfgBlockAccumulateEffects :: ACFGBlock -> ACFGBlock
 -- ^ Populate the observes and touches fields
 acfgBlockAccumulateEffects (ACFGBlock pblock@(PBlock _id instList _ _) pred succ _ _ im) =
-  let (oList, tList) = foldr (combine . opt) ([], []) instList
+  let (o1, t1) = toListPair instList
+      o2 = eliminateSubsets o1
+      t2 = eliminateSubsets t1
   in
-    -- note that these lists are still backwards. If you want them to
-    -- be minimal, like the todo above suggests, or do other
-    -- processing, that should happen here rather than later.
-    ACFGBlock pblock pred succ olist tList im
-  where combine popt (obsList, touchList) =
-          -- with foldr, produces a pair of lists for o/t'd varnodes
-          -- in reverse order from the current block
-          ((observes popt):obsList, (touches popt):touchList)
+    ACFGBlock pblock pred succ o2 t2 im
+  where addInst :: POpt -> ([VarNode], [VarNode]) -> ([VarNode], [VarNode])
+        addInst i prior =
+          ((uncurry addTouched) . (uncurry addObserved)) prior (observes i) (touches i)
+          -- prior -> prior w/ obs -> prior w/ both
+          -- i -------^---------------/
+        toListPair :: [PInst] -> ([VarNode], [VarNode])
+        toListPair il =
+          -- no base case version, inst list should already be non-empty
+          foldr1 addInst il
+
 
 populateBackLinks [ACFGBlock] -> [ACFGBlock]
 -- ^ Do an update pass over the blocks, populating the reverse cfg

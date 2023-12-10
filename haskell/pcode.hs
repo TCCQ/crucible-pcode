@@ -13,6 +13,9 @@ data VarNode = VarNode {
 -- ^ (Address Space Id, offset (signed for constants), Length/Size)
 -- Length should always be >= 0 I think
 
+isEmpty :: VarNode -> Bool
+isEmpty (VarNode _ _ len) = len == 0
+
 intersect :: VarNode -> VarNode -> Maybe VarNode
 -- ^ Commutative intersection. Local to address space.
 intersect a@(VarNode as ao al) b@(VarNode bs bo bl)
@@ -28,13 +31,46 @@ intersect a@(VarNode as ao al) b@(VarNode bs bo bl)
       else
         Just $ VarNode as bo $ (min (ae - bo) be) - bo
 
-difference :: VarNode -> VarNode -> Maybe VarNode
+difference :: VarNode -> VarNode -> Maybe [VarNode]
 -- ^ Non-commutative difference. Gives A \ (A n B), the remainder of a
--- after cutting out b.
+-- after cutting out b. Note that this may result in more than one
+-- interval if b is a strict subset. Returns an empty list rather than
+-- an empty VarNode if a is subsumed in b.
 difference a@(VarNode as ao al) b@(VarNode bs bo bl)
   | as /= bs = Nothing
-  | otherwise =
-    Just VarNode as ao $ (min (ao + al) bo) - ao
+  | otherwise = Just $
+    let startRel = fromJust (compareStart a b)
+        endRel = fromJust (compareEnd a b)
+        ae = ao + al
+        be = bo + bl
+    in --safe, done addrspace check
+      case startRel of
+        GT -> -- a starts after b
+          case compare ao be of
+            GT -> [a] -- b is entirely before, keep everything
+            EQ -> [a] -- they touch but don't overlap
+            LT -> case endRel of  -- a starts mid b
+              LT -> []            -- a is contained in b
+              EQ -> []            -- a is contained in b
+              GT -> [VarNode ao be (ae - be)] -- a extends past b
+        EQ -> -- a and b start at the same place
+          case endRel of
+            LT -> [] -- nothing left
+            EQ -> [] -- nothing left
+            GT ->    -- a is larger, take end
+              [VarNode as, be, (al - bl)]
+        LT -> -- a starts before b
+          case compare ae bo of
+            LT -> [a] -- a entirely before
+            EQ -> [a] -- touch but keep all
+            GT -> case endRel of -- possible overlap
+              LT ->              -- a overlaps, get just start
+                [VarNode as ao (bo - ao)]
+              EQ -> [VarNode as ao (bo - ao)] -- same thing
+              GT ->                           -- a hangs off both ends
+                [VarNode as ao (bo - ao), VarNode as be (be - ae)]
+
+
 
 compareStart :: VarNode -> VarNode -> Maybe Ord
 -- ^ Partial order on varnodes by starting address. Only defined in
@@ -60,9 +96,9 @@ compareContains a b
                                             LT -> error "non-symmetric < during compareContains")
   | otherwise =
       surrounding <$> (compareStart a b) <*> (compareEnd a b)
-  where surrounding = Just . (\cases { LT GT -> GT; EQ GT -> GT; GT GT -> LT;
-                                       LT EQ -> GT; EQ EQ -> EQ; GT EQ -> LT;
-                                       LT LT -> LT; EQ LT -> LT; GT LT -> LT})
+  where surrounding = (\cases { LT GT -> Just GT; EQ GT -> Just GT; GT GT -> Nothing;
+                                LT EQ -> GT; EQ EQ -> EQ; GT EQ -> Nothing;
+                                LT LT -> Nothing; EQ LT -> Nothing; GT LT -> Nothing})
 
 
 
