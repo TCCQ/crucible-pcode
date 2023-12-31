@@ -3,15 +3,25 @@
 -- sequences of instructions and CFGs are not here, but in the
 -- analysis module instead.
 
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveGeneric #-}
+
 module PCode where
 
+import Control.Lens
+import Data.Maybe (fromJust)
+
 data VarNode = VarNode {
-  addrSpace :: String,
-  vnOffset :: Integer,
-  vnLength :: Integer
+  _addrSpace :: !String,
+  _vnOffset :: !Integer,
+  _vnLength :: !Integer
   } deriving (Show, Read, Eq)
 -- ^ (Address Space Id, offset (signed for constants), Length/Size)
--- Length should always be >= 0 I think
+-- Length should always be >= 0 I think, but we want to arithetic with
+-- Integers, so it's not enforced here.
+makeLenses ''VarNode
 
 isEmpty :: VarNode -> Bool
 isEmpty (VarNode _ _ len) = len == 0
@@ -19,7 +29,7 @@ isEmpty (VarNode _ _ len) = len == 0
 intersect :: VarNode -> VarNode -> Maybe VarNode
 -- ^ Commutative intersection. Local to address space.
 intersect a@(VarNode as ao al) b@(VarNode bs bo bl)
-  | a0 > b0 = intersect b a
+  | ao > bo = intersect b a
   | as /= bs = Nothing
   | otherwise =
     let ae = ao + al
@@ -52,13 +62,13 @@ difference a@(VarNode as ao al) b@(VarNode bs bo bl)
             LT -> case endRel of  -- a starts mid b
               LT -> []            -- a is contained in b
               EQ -> []            -- a is contained in b
-              GT -> [VarNode ao be (ae - be)] -- a extends past b
+              GT -> [VarNode as be (ae - be)] -- a extends past b
         EQ -> -- a and b start at the same place
           case endRel of
             LT -> [] -- nothing left
             EQ -> [] -- nothing left
             GT ->    -- a is larger, take end
-              [VarNode as, be, (al - bl)]
+              [VarNode as be (al - bl)]
         LT -> -- a starts before b
           case compare ae bo of
             LT -> [a] -- a entirely before
@@ -72,32 +82,32 @@ difference a@(VarNode as ao al) b@(VarNode bs bo bl)
 
 
 
-compareStart :: VarNode -> VarNode -> Maybe Ord
+compareStart :: VarNode -> VarNode -> Maybe Ordering
 -- ^ Partial order on varnodes by starting address. Only defined in
 -- the same address space
-compareStart a@(VarNode as ao al) b@(VarNode bs bo bl)
+compareStart (VarNode as ao _al) (VarNode bs bo _bl)
   | as /= bs = Nothing
-  | otherwise = Just compare ao bo
+  | otherwise = Just $ compare ao bo
 
-compareEnd :: VarNode -> VarNode -> Maybe Ord
+compareEnd :: VarNode -> VarNode -> Maybe Ordering
 -- ^ Partial order on varnodes by end address. Only defined in
 -- the same address space
-compareEnd a@(VarNode as ao al) b@(VarNode bs bo bl)
+compareEnd (VarNode as ao al) (VarNode bs bo bl)
   | as /= bs = Nothing
-  | otherwise = Just compare (ao + al) (bo + bl)
+  | otherwise = Just $ compare (ao + al) (bo + bl)
 
-compareContains :: VarNode -> VarNode -> Maybe Ord
+compareContains :: VarNode -> VarNode -> Maybe Ordering
 -- ^ Partial order on varnodes by interval inclusion. A > B if A
 -- includes all of B. Only defined in the same address space.
-compareContains a b
-  | a0 > b0 = (compareContains b a) >>= (\case
+compareContains a@(VarNode _as ao _al) b@(VarNode _bs bo _bl)
+  | ao > bo = (compareContains b a) >>= (\case
                                             GT -> Just LT
                                             EQ -> Just EQ
                                             LT -> error "non-symmetric < during compareContains")
   | otherwise =
-      surrounding <$> (compareStart a b) <*> (compareEnd a b)
+      surrounding <$> (compareStart a b) <*> (compareEnd a b) >>= id
   where surrounding = (\cases { LT GT -> Just GT; EQ GT -> Just GT; GT GT -> Nothing;
-                                LT EQ -> GT; EQ EQ -> EQ; GT EQ -> Nothing;
+                                LT EQ -> Just GT; EQ EQ -> Just EQ; GT EQ -> Nothing;
                                 LT LT -> Nothing; EQ LT -> Nothing; GT LT -> Nothing})
 
 
@@ -113,101 +123,116 @@ compareContains a b
 
 -- Type for a single Pcode operation.
 data POpt =
-  COPY VarNode VarNode |
-  INT_ADD VarNode VarNode VarNode |
-  BOOL_OR VarNode VarNode VarNode |
-  LOAD VarNode VarNode VarNode |
-  INT_SUB VarNode VarNode VarNode |
-  FLOAT_EQUAL VarNode VarNode VarNode |
-  STORE VarNode VarNode VarNode |
-  INT_CARRY VarNode VarNode VarNode |
-  FLOAT_NOTEQUAL VarNode VarNode VarNode |
-  BRANCH VarNode | -- See the reference for interpretation
-  INT_SCARRY VarNode VarNode VarNode |
-  FLOAT_LESS VarNode VarNode VarNode |
-  CBRANCH VarNode VarNode |
-  INT_SBORROW VarNode VarNode VarNode |
-  FLOAT_LESSEQUAL VarNode VarNode VarNode |
-  BRANCHIND VarNode |
-  INT_2COMP VarNode VarNode |
-  FLOAT_ADD VarNode VarNode VarNode |
-  CALL VarNode | -- In raw Pcode only ever one input
-  INT_NEGATE VarNode VarNode |
-  FLOAT_SUB VarNode VarNode VarNode |
-  CALLIND VarNode |
-  INT_XOR VarNode VarNode VarNode |
-  FLOAT_MULT VarNode VarNode VarNode |
-  INT_AND VarNode VarNode VarNode |
-  FLOAT_DIV VarNode VarNode VarNode |
-  RETURN VarNode | -- In raw Pcode only ever one input
-  INT_OR VarNode VarNode VarNode |
-  FLOAT_NEG VarNode VarNode |
-  PIECE VarNode VarNode VarNode |
-  INT_LEFT VarNode VarNode VarNode |
-  FLOAT_ABS VarNode VarNode |
-  SUBPIECE VarNode VarNode VarNode | -- Second input should be constant
-  INT_RIGHT VarNode VarNode VarNode |
-  FLOAT_SQRT VarNode VarNode |
-  INT_EQUAL VarNode VarNode VarNode |
-  INT_SRIGHT VarNode VarNode VarNode |
-  FLOAT_CEIL VarNode VarNode |
-  INT_NOTEQUAL VarNode VarNode VarNode |
-  INT_MULT VarNode VarNode VarNode |
-  FLOAT_FLOOR VarNode VarNode |
-  INT_LESS VarNode VarNode VarNode |
-  INT_DIV VarNode VarNode VarNode |
-  FLOAT_ROUND VarNode VarNode |
-  INT_SLESS VarNode VarNode VarNode |
-  INT_REM VarNode VarNode VarNode |
-  FLOAT_NAN VarNode VarNode |
-  INT_LESSEQUAL VarNode VarNode VarNode |
-  INT_SDIV VarNode VarNode VarNode |
-  INT2FLOAT VarNode VarNode |
-  INT_SLESSEQUAL VarNode VarNode VarNode |
-  INT_SREM VarNode VarNode VarNode |
-  FLOAT2FLOAT VarNode VarNode |
-  INT_ZEXT VarNode VarNode |
-  BOOL_NEGATE VarNode VarNode |
-  TRUNC VarNode VarNode |
-  INT_SEXT VarNode VarNode |
-  BOOL_XOR VarNode VarNode VarNode |
-  BOOL_AND VarNode VarNode VarNode |
-  POPCOUNT VarNode VarNode
+  COPY !VarNode !VarNode |
+  INT_ADD !VarNode !VarNode !VarNode |
+  BOOL_OR !VarNode !VarNode !VarNode |
+  LOAD !VarNode !VarNode !VarNode |
+  INT_SUB !VarNode !VarNode !VarNode |
+  FLOAT_EQUAL !VarNode !VarNode !VarNode |
+  STORE !VarNode !VarNode !VarNode |
+  INT_CARRY !VarNode !VarNode !VarNode |
+  FLOAT_NOTEQUAL !VarNode !VarNode !VarNode |
+  BRANCH !VarNode | -- See the reference for interpretation
+  INT_SCARRY !VarNode !VarNode !VarNode |
+  FLOAT_LESS !VarNode !VarNode !VarNode |
+  CBRANCH !VarNode !VarNode |
+  INT_SBORROW !VarNode !VarNode !VarNode |
+  FLOAT_LESSEQUAL !VarNode !VarNode !VarNode |
+  BRANCHIND !VarNode |
+  INT_2COMP !VarNode !VarNode |
+  FLOAT_ADD !VarNode !VarNode !VarNode |
+  CALL !VarNode | -- In raw Pcode only ever one input
+  INT_NEGATE !VarNode !VarNode |
+  FLOAT_SUB !VarNode !VarNode !VarNode |
+  CALLIND !VarNode |
+  INT_XOR !VarNode !VarNode !VarNode |
+  FLOAT_MULT !VarNode !VarNode !VarNode |
+  INT_AND !VarNode !VarNode !VarNode |
+  FLOAT_DIV !VarNode !VarNode !VarNode |
+  RETURN !VarNode | -- In raw Pcode only ever one input
+  INT_OR !VarNode !VarNode !VarNode |
+  FLOAT_NEG !VarNode !VarNode |
+  PIECE !VarNode !VarNode !VarNode |
+  INT_LEFT !VarNode !VarNode !VarNode |
+  FLOAT_ABS !VarNode !VarNode |
+  SUBPIECE !VarNode !VarNode !VarNode | -- Second input should be constant
+  INT_RIGHT !VarNode !VarNode !VarNode |
+  FLOAT_SQRT !VarNode !VarNode |
+  INT_EQUAL !VarNode !VarNode !VarNode |
+  INT_SRIGHT !VarNode !VarNode !VarNode |
+  FLOAT_CEIL !VarNode !VarNode |
+  INT_NOTEQUAL !VarNode !VarNode !VarNode |
+  INT_MULT !VarNode !VarNode !VarNode |
+  FLOAT_FLOOR !VarNode !VarNode |
+  INT_LESS !VarNode !VarNode !VarNode |
+  INT_DIV !VarNode !VarNode !VarNode |
+  FLOAT_ROUND !VarNode !VarNode |
+  INT_SLESS !VarNode !VarNode !VarNode |
+  INT_REM !VarNode !VarNode !VarNode |
+  FLOAT_NAN !VarNode !VarNode |
+  INT_LESSEQUAL !VarNode !VarNode !VarNode |
+  INT_SDIV !VarNode !VarNode !VarNode |
+  INT2FLOAT !VarNode !VarNode |
+  INT_SLESSEQUAL !VarNode !VarNode !VarNode |
+  INT_SREM !VarNode !VarNode !VarNode |
+  FLOAT2FLOAT !VarNode !VarNode |
+  INT_ZEXT !VarNode !VarNode |
+  BOOL_NEGATE !VarNode !VarNode |
+  TRUNC !VarNode !VarNode |
+  INT_SEXT !VarNode !VarNode |
+  BOOL_XOR !VarNode !VarNode !VarNode |
+  BOOL_AND !VarNode !VarNode !VarNode |
+  POPCOUNT !VarNode !VarNode
   deriving (Show, Read)
 -- These shouldn't appear in raw pcode
 -- data CPOOLREF = -- variadic
 -- data NEW = -- variadic
 -- data USERDEFINED = -- variadic
 
+data PAddr = PAddr {
+  _maddr :: !Integer,
+  _offset :: !Integer
+  } deriving (Show, Read, Eq)
+
+makeLenses ''PAddr
+
+instance Ord PAddr where
+  (PAddr am ap) `compare` (PAddr bm bp) =
+    case am `compare` bm of
+      LT -> LT
+      GT -> GT
+      EQ -> ap `compare` bp
+
 data PInst = PInst {
-  maddr :: Integer,
-  pIOffset :: Integer,
-  opt :: POpt
+  _location :: !PAddr,
+  _opt :: !POpt
   } deriving (Show, Read)
 -- ^ A Machine address, the index of the operation inside the machine
 -- instruction, and a Pcode operation. This encoding allows for
 -- operation on sequences of this type without data loss.
 
+makeLenses ''PInst
+
 controlFlowP :: PInst -> Bool
 -- ^ Is this instruction a control flow instruction?
-controlFlowP (PInst _ _ popt) =
+controlFlowP (PInst _ popt) =
           case popt of
             BRANCH _ -> True
             CBRANCH _ _ -> True
             BRANCHIND _ -> True
-            CALL _ -> True
-            CALLIND _ -> True
-            RETURN _ -> True
-            otherwise -> False
+            -- CALL _ -> True
+            -- CALLIND _ -> True
+            -- RETURN _ -> True
+            _ -> False
 
 indirectP :: PInst -> Bool
 -- ^ Does this instruction have runtime calculated control flow targets?
-indirectP (PInst _ _ popt) =
+indirectP (PInst _ popt) =
           case popt of
             BRANCHIND _ -> True
-            CALLIND _ -> True
+            CALLIND _ -> True  -- It does, but it's not the kind we care about
             RETURN _ -> True
-            otherwise -> False
+            _ -> False
 
 -- TODO define these for inst or for opt?
 -- recall that the varnode order is inputs then output
@@ -293,21 +318,21 @@ touches (FLOAT_NOTEQUAL _va _vb out)  = [out]
 touches (BRANCH _target)              = []
 touches (INT_SCARRY _va _vb out)      = [out]
 touches (FLOAT_LESS _va _vb out)      = [out]
-touches (CBRANCH _target vb)          = []
+touches (CBRANCH _target _vb)         = []
 touches (INT_SBORROW _va _vb out)     = [out]
 touches (FLOAT_LESSEQUAL _va _vb out) = [out]
-touches (BRANCHIND va)                = []
+touches (BRANCHIND _va)               = []
 touches (INT_2COMP _va out)           = [out]
 touches (FLOAT_ADD _va _vb out)       = [out]
 touches (CALL _target)                = []
 touches (INT_NEGATE _va out)          = [out]
 touches (FLOAT_SUB _va _vb out)       = [out]
-touches (CALLIND va)                  = []
+touches (CALLIND _va)                 = []
 touches (INT_XOR _va _vb out)         = [out]
 touches (FLOAT_MULT _va _vb out)      = [out]
 touches (INT_AND _va _vb out)         = [out]
 touches (FLOAT_DIV _va _vb out)       = [out]
-touches (RETURN va)                   = []
+touches (RETURN _va)                  = []
 touches (INT_OR _va _vb out)          = [out]
 touches (FLOAT_NEG _va out)           = [out]
 touches (PIECE _va _vb out)           = [out]
@@ -342,43 +367,28 @@ touches (BOOL_XOR _va _vb out)        = [out]
 touches (BOOL_AND _va _vb out)        = [out]
 touches (POPCOUNT _va out)            = [out]
 
-type PAddr = (Integer, Integer)
--- ^ Readability, (maddr, offset) pair
---
--- This isn't a newtype with instanced Ord because I don't want to
--- have to unwrap PInst every time
-comparePAddr :: PAddr -> PAddr -> Ordering
-(am, ap) `comparePAddr` (bm, bp) =
-  case am `compare` bm of
-    LT -> LT
-    GT -> GT
-    EQ -> ap `compare` bp
-
-location :: PInst -> PAddr
--- ^ Where is this instruction? readability and saved unwrapping
-location (PInst m o _) = (m, o)
 
 at :: PInst -> PAddr -> Bool
 -- ^ Is this instruction here? likely want infix for smooth reading
-at (PInst imaddr ioff _opt) (bmaddr, boff) =
-  (imaddr == bmaddr) && (ioff == boff)
+at i addr = (==) addr $ _location i
 
-branchTarget :: PInst -> PAddr
-{- ^ Extract the correct target for branches and conditional
-branches. Do the discriminating between pcode relative and regular
-here. Only cares about the non-fallthrough target if there is more
-than one possible successor instruction. -}
-branchTarget inst@(PInst maddr pioffset (BRANCH (VarNode space vnoffset length))) =
-  if space == "constant"
-  then error "TODO check the pcode spec for branch"
-  else
-    if space == "" --TODO what is the other special one?
-    then error "TODO check spec"
-    else error $ "Branch with unexpected space: " ++ space
-branchTarget inst@(PInst maddr pioffset (CBRANCH _condition (VarNode space vnoffset length))) =
-  error "TODO"
-branchTarget inst@(PInst maddr pioffset (CALL (VarNode space vnoffset length))) =
-  error "TODO"
--- TODO this is incomeplete, but I think we should be good? I think it
--- should be enforced at compile time?
+-- branchTarget :: PInst -> PAddr
+-- {- ^ Extract the correct target for branches and conditional
+-- branches. Do the discriminating between pcode relative and regular
+-- here. Only cares about the non-fallthrough target if there is more
+-- than one possible successor instruction. -}
+-- branchTarget (PInst addr (BRANCH (VarNode space vnoffset length))) =
+--   if space == "constant"
+--   then error "TODO check the pcode spec for branch"
+--   else
+--     if space == "" --TODO what is the other special one?
+--     then error "TODO check spec"
+--     else error $ "Branch with unexpected space: " ++ space
+-- branchTarget (PInst addr (CBRANCH _condition (VarNode space vnoffset length))) =
+--   error "TODO"
+-- branchTarget (PInst addr (CALL (VarNode space vnoffset length))) =
+--   error "TODO"
+-- branchTarget _ = error "Called branchTarget on non branch"
+-- -- TODO this is incomplete, but I think we should be good? I think it
+-- -- should be enforced at compile time?
 

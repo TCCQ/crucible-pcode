@@ -1,11 +1,17 @@
 *.pdf
+*.dvi
 *~
 *.out
 *.aux
+*.bbl
+*.blg
 *.lof
 *.log
 *.toc
+*.synctex.gz
 *.o
 *.hi
 *TAGS
 haskell/main
+haskell/dist-newstyle
+auto

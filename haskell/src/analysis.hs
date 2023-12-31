@@ -6,6 +6,7 @@ module Analysis where
 
 import Data.List (find)
 import Data.Set
+import Control.Lens
 
 import PCode
 
@@ -20,20 +21,18 @@ type PIStream = [PInst]
 -- ^ Slightly more readable function types
 
 data PBlock = PBlock {
-  pBlockId :: Integer,
-  stream :: [PInst],
-  ghidraIsFunctionHead :: Bool,
-  ghidraName :: Maybe String
+  _BlockId :: Integer,
+  _stream :: [PInst],
   }
 {- ^ These are a contiguous stream of instructions that we think are
  probably atomic with respect to clontrol flow. they have ids to talk
  about them indirectly. An id is a reference to the block starting at
- the associated instruction, though that mapping may be arbitary. This
+ the associated instruction, though that mapping may be arbitrary. This
  matters if you decide laters to split a block. The new block before
  the split should keep the same id, and the block after should get a
- new one. They also have some info carried in from ghidra, namely the
- name of the block, if it is associated with a label, and whether
- ghidra thinks this block is the start of a function.-}
+ new one. -}
+
+makeLenses ''PBlock
 
 terminating :: PBlock -> PInst
 initial :: PBlock -> PInst
@@ -77,6 +76,19 @@ splitBlockInList nid target blockList =
 -- A collection of blocks that might reasonably go together. The
 -- blocks of a function or several functions. These sequences must be
 -- kept in program order.
+
+data PFunction = PFunction {
+  blocks :: [PBlock], -- in program order, head is entry
+  name :: String
+  }
+-- ^ A set of sequential blocks that form a function. These will
+-- become the functions in the crucible graph.
+
+funcLocation :: PFunction -> PAddr
+funcLocation (PFunction h:_rest _) =
+
+
+-- TODO read or whatever parsing for full functions
 
 data PBlockSeq = PBlockSeq {
   blocks :: [PBlock],
