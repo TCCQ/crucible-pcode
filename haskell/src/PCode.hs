@@ -3,7 +3,6 @@
 -- sequences of instructions and CFGs are not here, but in the
 -- analysis module instead.
 
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
@@ -11,106 +10,19 @@
 module PCode where
 
 import Control.Lens
-import Data.Maybe (fromJust)
 
+{- | (Address Space Id, offset (signed for constants), Length/Size)
+Length should always be >= 0 I think, but we want to arithetic with
+Integers, so it's not enforced here. -}
 data VarNode = VarNode {
   _addrSpace :: !String,
   _vnOffset :: !Integer,
   _vnLength :: !Integer
   } deriving (Show, Read, Eq)
--- ^ (Address Space Id, offset (signed for constants), Length/Size)
--- Length should always be >= 0 I think, but we want to arithetic with
--- Integers, so it's not enforced here.
 makeLenses ''VarNode
 
 isEmpty :: VarNode -> Bool
 isEmpty (VarNode _ _ len) = len == 0
-
-intersect :: VarNode -> VarNode -> Maybe VarNode
--- ^ Commutative intersection. Local to address space.
-intersect a@(VarNode as ao al) b@(VarNode bs bo bl)
-  | ao > bo = intersect b a
-  | as /= bs = Nothing
-  | otherwise =
-    let ae = ao + al
-        be = bo + bl
-    in
-      if bo > ae
-      then
-        Nothing
-      else
-        Just $ VarNode as bo $ (min (ae - bo) be) - bo
-
-difference :: VarNode -> VarNode -> Maybe [VarNode]
--- ^ Non-commutative difference. Gives A \ (A n B), the remainder of a
--- after cutting out b. Note that this may result in more than one
--- interval if b is a strict subset. Returns an empty list rather than
--- an empty VarNode if a is subsumed in b.
-difference a@(VarNode as ao al) b@(VarNode bs bo bl)
-  | as /= bs = Nothing
-  | otherwise = Just $
-    let startRel = fromJust (compareStart a b)
-        endRel = fromJust (compareEnd a b)
-        ae = ao + al
-        be = bo + bl
-    in --safe, done addrspace check
-      case startRel of
-        GT -> -- a starts after b
-          case compare ao be of
-            GT -> [a] -- b is entirely before, keep everything
-            EQ -> [a] -- they touch but don't overlap
-            LT -> case endRel of  -- a starts mid b
-              LT -> []            -- a is contained in b
-              EQ -> []            -- a is contained in b
-              GT -> [VarNode as be (ae - be)] -- a extends past b
-        EQ -> -- a and b start at the same place
-          case endRel of
-            LT -> [] -- nothing left
-            EQ -> [] -- nothing left
-            GT ->    -- a is larger, take end
-              [VarNode as be (al - bl)]
-        LT -> -- a starts before b
-          case compare ae bo of
-            LT -> [a] -- a entirely before
-            EQ -> [a] -- touch but keep all
-            GT -> case endRel of -- possible overlap
-              LT ->              -- a overlaps, get just start
-                [VarNode as ao (bo - ao)]
-              EQ -> [VarNode as ao (bo - ao)] -- same thing
-              GT ->                           -- a hangs off both ends
-                [VarNode as ao (bo - ao), VarNode as be (be - ae)]
-
-
-
-compareStart :: VarNode -> VarNode -> Maybe Ordering
--- ^ Partial order on varnodes by starting address. Only defined in
--- the same address space
-compareStart (VarNode as ao _al) (VarNode bs bo _bl)
-  | as /= bs = Nothing
-  | otherwise = Just $ compare ao bo
-
-compareEnd :: VarNode -> VarNode -> Maybe Ordering
--- ^ Partial order on varnodes by end address. Only defined in
--- the same address space
-compareEnd (VarNode as ao al) (VarNode bs bo bl)
-  | as /= bs = Nothing
-  | otherwise = Just $ compare (ao + al) (bo + bl)
-
-compareContains :: VarNode -> VarNode -> Maybe Ordering
--- ^ Partial order on varnodes by interval inclusion. A > B if A
--- includes all of B. Only defined in the same address space.
-compareContains a@(VarNode _as ao _al) b@(VarNode _bs bo _bl)
-  | ao > bo = (compareContains b a) >>= (\case
-                                            GT -> Just LT
-                                            EQ -> Just EQ
-                                            LT -> error "non-symmetric < during compareContains")
-  | otherwise =
-      surrounding <$> (compareStart a b) <*> (compareEnd a b) >>= id
-  where surrounding = (\cases { LT GT -> Just GT; EQ GT -> Just GT; GT GT -> Nothing;
-                                LT EQ -> Just GT; EQ EQ -> Just EQ; GT EQ -> Nothing;
-                                LT LT -> Nothing; EQ LT -> Nothing; GT LT -> Nothing})
-
-
 
 -- -------------------------------------------------------------------
 -- Pcode operations.
@@ -184,16 +96,16 @@ data POpt =
   BOOL_AND !VarNode !VarNode !VarNode |
   POPCOUNT !VarNode !VarNode
   deriving (Show, Read)
--- These shouldn't appear in raw pcode
--- data CPOOLREF = -- variadic
--- data NEW = -- variadic
--- data USERDEFINED = -- variadic
+-- These shouldn't appear in raw pcode, as they are variatic
+-- CPOOLREF
+-- NEW
+-- USERDEFINED
 
+{- | An instruction address in P-Code. | -}
 data PAddr = PAddr {
   _maddr :: !Integer,
   _offset :: !Integer
   } deriving (Show, Read, Eq)
-
 makeLenses ''PAddr
 
 instance Ord PAddr where
@@ -203,14 +115,13 @@ instance Ord PAddr where
       GT -> GT
       EQ -> ap `compare` bp
 
+{- | A Machine address, the index of the operation inside the machine
+    instruction, and a Pcode operation. This encoding allows for
+    operation on sequences of this type without data loss. | -}
 data PInst = PInst {
   _location :: !PAddr,
   _opt :: !POpt
   } deriving (Show, Read)
--- ^ A Machine address, the index of the operation inside the machine
--- instruction, and a Pcode operation. This encoding allows for
--- operation on sequences of this type without data loss.
-
 makeLenses ''PInst
 
 controlFlowP :: PInst -> Bool

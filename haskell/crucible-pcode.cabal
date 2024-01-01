@@ -58,17 +58,27 @@ library
     import:           warnings
 
     -- Modules exported by the library.
-    exposed-modules:  PCode
+    exposed-modules:  PCode,
+                      Analysis
 
     -- Modules included in this library but not exported.
-    -- other-modules:
+    other-modules: VarNodeUtils
+
+    default-extensions: LambdaCase,
+                        TemplateHaskell,
+                        DeriveDataTypeable,
+                        DeriveGeneric,
+                        BangPatterns
+
+
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.17.1.0,
-                      lens ^>= 5.2.3
+                      lens ^>= 5.2.3,
+                      containers >= 0.4
 
     -- Directories containing source files.
     hs-source-dirs:   src
