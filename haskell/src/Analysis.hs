@@ -139,6 +139,7 @@ data Successor =
   -- level callgraph. The other arms are edges in the function-local
   -- CFG.
 
+-- TODO should this just return empty if it's not appropriate?
 intoList :: Successor -> Maybe [Integer]
 intoList (Fallthrough fallthrough) = Just [fallthrough]
 intoList (UncondTarget target) = Just [target]
