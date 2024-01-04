@@ -5,6 +5,7 @@
 module PreCrucible where
 
 import Data.List
+import qualified Data.Set as Set
 import Control.Lens
 import qualified Data.Map as Map
 
@@ -61,4 +62,35 @@ collectBlockArgs acfg =
               (filter ((== "register") . (view addrSpace)) rawVNList)
               priorMap
 
+{- | A concrete register for us is an 8byte register that is dijoint
+   with all other concrete registers. They are indexed from zero, and
+   correspond with the varnode register space such that a byte at
+   address `a` will lie in register `a / 8`. This is implemented as a
+   new type so that we can't do integer operations accidentally, and
+   to allow for adding new fields later. | -}
+newtype ConcreteReg = ConcreteReg {
+  _rid :: !Integer
+  }
+makeLenses ''ConcreteReg
+
+{- | Turn register varnodes into concrete registers. VarNodes can become
+   zero or more than one register if they are zero length or length
+   greater than 8.| -}
+concretify :: VarNode -> [ConcreteReg]
+concretify vn
+  | vn^.addrSpace /= "register" = error "concretify non-register varnode"
+  | otherwise =
+    (\v -> if
+        | v^.vnLength == 0 -> []
+        | v^.vnLength <= 8 -> [(ConcreteReg (v^.vnOffset / 8))]
+        | otherwise ->
+          ((ConcreteReg (v^.vnOffset / 8))):(concretify (shorten vn)))
+  where shorten = (over vnOffset (8+)) . (over vnLength ((-8)+))
+
+{- | Collect the registers for feeding into crucible. Uses a set because
+   we don't want duplicates, and sets support fast operations for
+   things like detecting registers we haven't seen before. | -}
+concretifyBlockArgs :: [VarNode] -> Set.Set ConcreteReg
+concretifyBlockArgs vnList =
+  fromList $ map concretify vnList
 
