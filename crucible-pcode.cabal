@@ -80,7 +80,9 @@ library
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.17.1.0,
                       lens ^>= 5.2.3,
-                      containers >= 0.4
+                      containers >= 0.4,
+                      what4 >= 0.4.1,
+                      crucible >= 0.5
 
     -- Directories containing source files.
     hs-source-dirs:   src
