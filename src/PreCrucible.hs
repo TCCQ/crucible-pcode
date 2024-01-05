@@ -69,8 +69,8 @@ collectBlockArgs acfg =
    new type so that we can't do integer operations accidentally, and
    to allow for adding new fields later. | -}
 newtype ConcreteReg = ConcreteReg {
-  _rid :: !Integer
-  }
+  _rid :: Integer
+  } deriving (Eq, Ord)
 makeLenses ''ConcreteReg
 
 {- | Turn register varnodes into concrete registers. VarNodes can become
@@ -82,9 +82,9 @@ concretify vn
   | otherwise =
     (\v -> if
         | v^.vnLength == 0 -> []
-        | v^.vnLength <= 8 -> [(ConcreteReg (v^.vnOffset / 8))]
+        | v^.vnLength <= 8 -> [(ConcreteReg (v^.vnOffset `div` 8))]
         | otherwise ->
-          ((ConcreteReg (v^.vnOffset / 8))):(concretify (shorten vn)))
+          ((ConcreteReg (v^.vnOffset `div` 8))):(concretify (shorten vn))) vn
   where shorten = (over vnOffset (8+)) . (over vnLength ((-8)+))
 
 {- | Collect the registers for feeding into crucible. Uses a set because
@@ -92,5 +92,5 @@ concretify vn
    things like detecting registers we haven't seen before. | -}
 concretifyBlockArgs :: [VarNode] -> Set.Set ConcreteReg
 concretifyBlockArgs vnList =
-  fromList $ map concretify vnList
+  Set.fromList $ concat $ map concretify vnList
 
