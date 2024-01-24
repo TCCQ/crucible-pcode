@@ -10,9 +10,7 @@ import Control.Lens
 import qualified Data.Map as Map
 
 import PCode
--- import qualified VarNodeUtils as VN
 import Analysis
-
 
 type AMap = Map.Map Integer ACFGBlock
 
@@ -75,7 +73,8 @@ makeLenses ''ConcreteReg
 
 {- | Turn register varnodes into concrete registers. VarNodes can become
    zero or more than one register if they are zero length or length
-   greater than 8.| -}
+   greater than 8. If the list is more than one register long, the
+   resulting registers are in ascending order based on offset. | -}
 concretify :: VarNode -> [ConcreteReg]
 concretify vn
   | vn^.addrSpace /= "register" = error "concretify non-register varnode"
@@ -93,4 +92,5 @@ concretify vn
 concretifyBlockArgs :: [VarNode] -> Set.Set ConcreteReg
 concretifyBlockArgs vnList =
   Set.fromList $ concat $ map concretify vnList
+
 

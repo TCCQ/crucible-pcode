@@ -60,19 +60,23 @@ library
     -- Modules exported by the library.
     exposed-modules:  PCode,
                       Analysis,
-                      PreCrucible
+                      PreCrucible,
+                      IntoGenerator
 
     -- Modules included in this library but not exported.
-    other-modules: VarNodeUtils
+    other-modules: VarNodeUtils,
+                   Effects,
+                   ConversionTypes
 
     default-extensions: LambdaCase,
                         MultiWayIf,
                         TemplateHaskell,
                         DeriveDataTypeable,
                         DeriveGeneric,
-                        BangPatterns
-
-
+                        BangPatterns,
+                        TypeOperators,
+                        DataKinds,
+                        ConstraintKinds
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -82,7 +86,11 @@ library
                       lens ^>= 5.2.3,
                       containers >= 0.4,
                       what4 >= 0.4.1,
-                      crucible >= 0.5
+                      crucible >= 0.5,
+                      parameterized-utils >= 2.1.7.0,
+                      mtl >= 2.2.2,
+                      bv-sized >= 1.0.5,
+                      text >= 2.0.2
 
     -- Directories containing source files.
     hs-source-dirs:   src

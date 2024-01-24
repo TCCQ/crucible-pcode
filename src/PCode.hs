@@ -145,6 +145,40 @@ indirectP (PInst _ popt) =
             RETURN _ -> True
             _ -> False
 
+{- | Legal termining instruction of a block with a non-fallthrough
+   successor | -}
+terminalP :: PInst -> Bool
+terminalP inst = case (inst^.opt) of
+          CALL _ -> True
+          CALLIND _ -> True
+          RETURN _ -> True
+          BRANCH _ -> True
+          CBRANCH _ _ -> True
+          BRANCHIND _ -> True
+          _ -> False
+
+floatP :: PInst -> Bool
+floatP inst =
+  case (inst^.opt) of
+    FLOAT_EQUAL _ _ _ -> True
+    FLOAT_NOTEQUAL _ _ _ -> True
+    FLOAT_LESS _ _ _ -> True
+    FLOAT_LESSEQUAL _ _ _ -> True
+    FLOAT_ADD _ _ _ -> True
+    FLOAT_SUB _ _ _ -> True
+    FLOAT_MULT _ _ _ -> True
+    FLOAT_DIV _ _ _ -> True
+    FLOAT_NEG _ _ -> True
+    FLOAT_ABS _ _ -> True
+    FLOAT_SQRT _ _ -> True
+    FLOAT_CEIL _ _ -> True
+    FLOAT_FLOOR _ _ -> True
+    FLOAT_ROUND _ _ -> True
+    FLOAT_NAN _ _ -> True
+    INT2FLOAT _ _ -> True
+    FLOAT2FLOAT _ _ -> True
+    _ -> False
+
 -- TODO define these for inst or for opt?
 -- recall that the varnode order is inputs then output
 observes :: POpt -> [VarNode]
