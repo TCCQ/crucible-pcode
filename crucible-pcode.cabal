@@ -61,11 +61,12 @@ library
     exposed-modules:  PCode,
                       Analysis,
                       PreCrucible,
-                      IntoGenerator
+                      IntoGenerator,
+                      Effects
 
     -- Modules included in this library but not exported.
     other-modules: VarNodeUtils,
-                   Effects,
+                   -- Effects,
                    ConversionTypes
 
     default-extensions: LambdaCase,
@@ -76,7 +77,20 @@ library
                         BangPatterns,
                         TypeOperators,
                         DataKinds,
-                        ConstraintKinds
+                        ConstraintKinds,
+                        TypeApplications,
+                        ExistentialQuantification,
+                        GADTs,
+                        BlockArguments,
+                        ScopedTypeVariables,
+                        Rank2Types,
+                        RankNTypes,
+                        KindSignatures,
+                        AllowAmbiguousTypes,
+                        PolyKinds,
+                        -- ImpredicativeTypes,
+                        LiberalTypeSynonyms,
+                        FlexibleInstances
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

@@ -6,10 +6,12 @@ module ConversionTypes where
 import qualified Data.Map as Map
 import Control.Lens
 import Data.Parameterized.Ctx
+import Control.Monad.State
 
 import qualified Lang.Crucible.FunctionHandle as C.FuncH
 import qualified Lang.Crucible.CFG.Generator as C.Gen
 import qualified Lang.Crucible.CFG.Reg as C.Reg
+import qualified Lang.Crucible.CFG.Expr as C.Expr
 import Lang.Crucible.Types
 
 import PCode
@@ -24,7 +26,7 @@ import PreCrucible
 -- There are no more than 256 registers
 -- (there are *exactly*, but you don't have to use them)
 
-{- | Register Set. The full register machine state.| -}
+{- | Register Set. The full register machine state. | -}
 type RegisterSet =
   SymbolicStructType (EmptyCtx ::> (BaseBVType 64))
 
@@ -61,6 +63,13 @@ makeLenses ''CGenState
 -- guessing that the list monad is what we want, since some pcode
 -- statements may become more than one top-level action. Subject to
 -- change.
-type PCodeGenerator s a = C.Gen.Generator () s (CGenState) RegisterSet [] a
+type PCodeGenerator s a = C.Gen.Generator () s (CGenState) RegisterSet (Either String) a
 -- TODO it wants state to be a kind `* -> *` thing, but I don't plan on changing types, so I guess the `s` type will do that for me?
+
+-- Positive compiletime restriction
+data SomePos = forall n. 1 <= n => SomePos (NatRepr n)
+
+data BVApp s w = BVApp (NatRepr w) (C.Expr.App () (C.Reg.Expr () s) (BVType w))
+
+data BVDest s w = BVDest (NatRepr w) ((BVApp s w) -> PCodeGenerator s ())
 
