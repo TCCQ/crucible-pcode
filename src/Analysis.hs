@@ -23,9 +23,6 @@ import VarNodeUtils
 -- Contigious sequences of instructions and things we might want to do
 -- with them.
 
-type PIStream = [PInst]
--- ^ Slightly more readable function types
-
 data PBlock = PBlock {
   _blockId :: !Integer,
   _stream :: [PInst]
@@ -52,19 +49,19 @@ splitBlock :: Integer -> PAddr -> PBlock -> Maybe (PBlock, PBlock)
 splitBlock nid target (PBlock oid bstream) =
   let (before, after) = break ((== target) . (view location)) bstream
   in
-    if null after
+    if (null after) || (null before)
     then
       Nothing
     else
       Just (PBlock oid before,
             PBlock nid after)
 
-splitBlockInList :: Integer -> PAddr -> [PBlock] -> Maybe [PBlock]
+_splitBlockInList :: Ordering -> Integer -> PAddr -> [PBlock] -> Maybe [PBlock]
 -- ^ Same thing, but just traverse the list for it and return the
 -- replcaement list if possible. Nothing if the address doesn't match
--- anything. Assumes the list of blocks is in program order.
-splitBlockInList nid target blockList =
-  let (beforeAndCurrent, after) = break ((/= LT) . (compare target) . (view location) . initial) blockList
+-- anything. Assumes the list of blocks is in reversed program order.
+_splitBlockInList whileOrd nid target blockList =
+  let (beforeAndCurrent, after) = break ((/= whileOrd) . (compare target) . (view location) . initial) blockList
       toSplit = last beforeAndCurrent
       prior = init beforeAndCurrent
   in
@@ -74,15 +71,67 @@ splitBlockInList nid target blockList =
     else
       (splitBlock nid target toSplit) >>= (\(a,b) -> Just [a,b]) >>= (\newEntryList -> Just $ concat [prior, newEntryList, after])
 
+splitBlockInForwardList :: Integer -> PAddr -> [PBlock] -> Maybe [PBlock]
+splitBlockInForwardList nid target blockList =  _splitBlockInList LT nid target blockList
+splitBlockInRevList :: Integer -> PAddr -> [PBlock] -> Maybe [PBlock]
+splitBlockInRevList nid target blockList =  _splitBlockInList GT nid target blockList
+
+initialSplitPass :: [PInst] -> ([PBlock], Integer)
+initialSplitPass iList =
+  let (rBlocks, nextId, []) = _initialSplitPass ([], 1, []) iList
+  in
+    ((reverse rBlocks), nextId)
+
+_initialSplitPass :: ([PBlock], Integer, [PInst]) -> [PInst] -> ([PBlock], Integer, [PInst])
+-- ^ Splits based on where control flow instructions are, that's it
+_initialSplitPass acc [] = acc
+_initialSplitPass (revPriorBlocks, nextId, revInstAcc) (nextI:streamRest) =
+  if (terminalP nextI)
+  then
+    _initialSplitPass ((PBlock nextId (reverse (nextI:revInstAcc))):revPriorBlocks,
+                       nextId + 1,
+                       []
+                      )
+                      streamRest
+  else
+    _initialSplitPass (revPriorBlocks, nextId, (nextI:revInstAcc)) streamRest
+
+targetSplitPass :: Integer -> [PBlock] -> [PBlock] -> [PBlock]
+targetSplitPass nextId revPriorBlocks [] = reverse revPriorBlocks
+targetSplitPass nextId revPriorBlocks (nextBlock:remainingBlocks) =
+    case (branchTarget (terminating nextBlock)) of
+      Just tAddr -> case (compare tAddr ((view location) (initial nextBlock))) of
+        LT ->
+          case (splitBlockInRevList nextId tAddr revPriorBlocks) of
+            Just newPrior ->
+              targetSplitPass (nextId+1) (nextBlock:newPrior) remainingBlocks
+            Nothing -> --already exists, (out of func jump caught in cfg pass), same as base case
+              targetSplitPass nextId (nextBlock:revPriorBlocks) remainingBlocks
+        GT ->
+          case (splitBlockInForwardList nextId tAddr (nextBlock:remainingBlocks)) of
+            Just (newNextBlock:newRemainingBlocks) ->
+              targetSplitPass (nextId+1) (newNextBlock:revPriorBlocks) newRemainingBlocks
+            Nothing -> --already exists, (out of func jump caught in cfg pass), same as base case
+              targetSplitPass nextId (nextBlock:revPriorBlocks) remainingBlocks
+        EQ -> --split already exists here, we are good, same as base case
+          targetSplitPass nextId (nextBlock:revPriorBlocks) remainingBlocks
+      Nothing -> targetSplitPass nextId (nextBlock:revPriorBlocks) remainingBlocks
+
+mkPFunction :: String -> [PInst] -> PFunction
+mkPFunction name stream =
+  let (bList, nid) = initialSplitPass stream
+      bList' = targetSplitPass nid [] bList
+  in
+    PFunction bList' name
+
 -- -------------------------------------------------------------------
 --
 -- Sequences of blocks.
 --
 -- A collection of blocks that might reasonably go together. The
--- blocks of a function or several functions. These sequences must be
--- kept in program order.
+-- blocks of a function. These sequences must be kept in program
+-- order.
 
--- TODO read or whatever parsing for full functions
 data PFunction = PFunction {
   _blocks :: [PBlock], -- in program order, head is entry
   _name :: !String
@@ -90,19 +139,6 @@ data PFunction = PFunction {
 -- ^ A set of sequential blocks that form a function. These will
 -- become the functions in the crucible graph.
 makeLenses ''PFunction
-
--- data PBlockSeq = PBlockSeq {
---   blocks :: [PBlock],
---   pBSeqNextId :: Integer -- first unused id. Used for splits
---   }
--- -- ^ Sequences of this type are expected to keep blocks in program order.
-
--- findByHead :: PBlockSeq -> PAddr -> Maybe Integer
--- -- ^ Just id of block with matching initial instruction in this seq,
--- -- or Nothing if there isn't one in this seq
--- findByHead (PBlockSeq blocks _) testAddr =
---           (find (((flip at) testAddr) . initial)
---             blocks) >>= (\(PBlock id _ _ _) -> Just id)
 
 -- -------------------------------------------------------------------
 --
@@ -126,10 +162,11 @@ data Successor =
   Fallthrough Integer
   -- IndirectSet [Integer]      -- TODO will we ever use this?
   | UncondTarget Integer
-  | CondTarget Integer Integer -- target, then fallthrough
-  | Extern PAddr                -- A call to another function
-  | ExternInd                   -- A call with an indirect target
-                                -- (likely most of them)
+  | CondTarget VarNode Integer Integer -- target, then fallthrough
+  -- | Extern PAddr                -- A call to another function
+  -- | ExternInd                   -- A call with an indirect target
+  --                               -- (likely most of them)
+  -- TODO these aren't termining in crucible
   | ExternReturn                -- a return to a calling func
   -- ^ These tell you about your terminating instruction and which
   -- nodes are immediately dominated. This type singals completed
@@ -143,7 +180,7 @@ data Successor =
 intoList :: Successor -> Maybe [Integer]
 intoList (Fallthrough fallthrough) = Just [fallthrough]
 intoList (UncondTarget target) = Just [target]
-intoList (CondTarget target fallthrough) = Just [target, fallthrough]
+intoList (CondTarget _ target fallthrough) = Just [target, fallthrough]
 intoList _ = Nothing
 
 
@@ -157,31 +194,31 @@ data CFGBlock = CFGBlock {
   {- ^ A single node in a CFG -}
 makeLenses ''CFGBlock
 
-splitCFGB :: Integer -> PAddr -> CFGBlock -> Maybe (CFGBlock, CFGBlock)
--- ^ Lift a block split to work on nodes. The later block inherits the
--- dominated blocks of the prior, and the prior gets just the later as
--- a fallthrough.
-splitCFGB nid target (CFGBlock oblock osucc) =
-  (splitBlock nid target oblock) >>= (\(a,b) ->
-                                        Just (
-                                         CFGBlock a (Right (Fallthrough nid)),
-                                         CFGBlock b osucc
-                                         ))
+-- splitCFGB :: Integer -> PAddr -> CFGBlock -> Maybe (CFGBlock, CFGBlock)
+-- -- ^ Lift a block split to work on nodes. The later block inherits the
+-- -- dominated blocks of the prior, and the prior gets just the later as
+-- -- a fallthrough.
+-- splitCFGB nid target (CFGBlock oblock osucc) =
+--   (splitBlock nid target oblock) >>= (\(a,b) ->
+--                                         Just (
+--                                          CFGBlock a (Right (Fallthrough nid)),
+--                                          CFGBlock b osucc
+--                                          ))
 
-splitCFGBInList :: Integer -> PAddr -> [CFGBlock] -> Maybe [CFGBlock]
--- ^ Same thing, but just traverse the list for it and return the
--- replcaement list if possible. Nothing if the address doesn't match
--- anything
-splitCFGBInList nid target nodeList =
-  let (beforeAndCurrent, after) = break ((/= LT) . (compare target) . (view location) . initial . (view block)) nodeList
-      toSplit = last beforeAndCurrent
-      prior = init beforeAndCurrent
-  in
-    if null beforeAndCurrent
-    then
-      Nothing
-    else
-      (splitCFGB nid target toSplit) >>= (\(a,b) -> Just [a,b]) >>= (\newEntryList -> Just $ concat [prior, newEntryList, after])
+-- splitCFGBInList :: Integer -> PAddr -> [CFGBlock] -> Maybe [CFGBlock]
+-- -- ^ Same thing, but just traverse the list for it and return the
+-- -- replcaement list if possible. Nothing if the address doesn't match
+-- -- anything
+-- splitCFGBInList nid target nodeList =
+--   let (beforeAndCurrent, after) = break ((/= LT) . (compare target) . (view location) . initial . (view block)) nodeList
+--       toSplit = last beforeAndCurrent
+--       prior = init beforeAndCurrent
+--   in
+--     if null beforeAndCurrent
+--     then
+--       Nothing
+--     else
+--       (splitCFGB nid target toSplit) >>= (\(a,b) -> Just [a,b]) >>= (\newEntryList -> Just $ concat [prior, newEntryList, after])
 
 data CFG = CFG {
   _nodes :: [CFGBlock],
@@ -202,100 +239,49 @@ data CFG = CFG {
 -- handle that yourself or warn / panic at the sign of indirection.
 makeLenses ''CFG
 
--- -------------------------------------------------------------------
---
--- Build the augmented types by doing analysis along the way
+locToBidMapper :: PFunction -> Map.Map PAddr Integer
+locToBidMapper (PFunction blockList _name) =
+  foldl' (\ !priorMap block ->
+             Map.insert (((view location) . initial) block) (block^.blockId) priorMap)
+         Map.empty
+         blockList
 
--- TODO v This function is really really messy. That's because it
--- basically doesn't have any easily broken off subroutines, and while
--- there is a lot of very similar code, there is basically no code
--- reuse between case arms. And what little there is can't even be
--- patched up with contiuations or generic types or anything slick
--- like that to have code reuse sandwiched by specialization. At least
--- that's what it looks like to me at the moment.
--- linkCFG :: PFunction -> [CFGBlock] -> CFG
-{- ^ Gnarly. Does the messy job of coverting the block list one at a
- time into CFG nodes that have id references to the immediately
- dominated successor blocks for each input block. Recurses and
- consumes from the front of the block sequence and appends to the back
- of the node sequence. Passes both down. This split list recusion
- allows us to mutate (notably split) both the consumed and unconsumed
- parts of the sequence when we find a target that splits a block. -}
--- linkCFG seq@(PBlockSeq rawBlockStream unusedId) prefix =
---   if null rawBlockStream
---   then
---     -- base case. No more blocks to analyze
---     CFG prefix unusedId False
---   else
---     -- TODO could this let block be partially a where block? I need
---     -- that null check for safety, but laziness might make it work
---     let curBlock = head rawBlockStream
---         blockStream = tail rawBlockStream
---         curInst = terminating curBlock
---         target = branchTarget curInst
---         tOpt = opt curInst
---         single :: Either TargetExcuse Sucessor -- only safe on BRANCH/CALL/CBRANCH
---         single = case (findByHead seq target) of
---                    Just id -> Right $ UncondTarget id
---                    Nothing -> Left $ UncondNeedSplit target
---         successor = case tOpt of
---                       BRANCH _ -> single
---                       CALL _ -> single
---                       CBRANCH _ _ ->
---                         case blockStream of
---                           (PBlock nextId _ _ _):_rest ->
---                             -- there is some next block
---                             case findByHead seq target of
---                               Just targetId -> Right (CondTarget targetId nextId)
---                               Nothing -> Left (CondNeedSplit target nextId)
---                           otherwise -> error $ "CBRANCH fallthrough fell off the sequence: " ++ (show curInst)
---                       BRANCHIND _ -> Left Indirect
---                       CALLIND _ -> Left Indirect
---                       RETURN _ -> Left Indirect
---                       otherwise -> error $ "Unexpected instruction type during CFG branch target discovery. This shouldn't happen: " ++ (show curInst)
---     in
---       -- We have a sucessor, of the sort that CFGBlock expects, but we might still have to split a block somewhere
---       case successor of
---         Right succ -> -- We are done, no splitting necessary.
---           linkCFG (PBlockSeq blockStream unusedId) $ prefix ++ [CFGBlock curBlock (Right succ)]
---         Left (UncondNeedSplit splitAddr) ->
---           case splitCFGBInList unusedId splitAddr prefix of
---             Just newPrefix ->
---               -- It worked, we found it. Now just recurse as normal, linking our newly inserted block
---               linkCFG (PBlockSeq blockStream (unusedId + 1)) $ newPrefix ++ [CFGBlock curBlock (Right $ UncondTarget unusedId)]
---             Nothing ->
---               -- It didn't work, we need to look for a block that we haven't yet converted
---               case splitBlockInList unusedId splitAddr (curBlock:blockStream) of
---                 Just (newBSHead:newBSTail) ->
---                   -- Found it, recurse. We need to use the replacement
---                   -- version of blockStream for both head and tail
---                   -- since we might have split the block we are
---                   -- currently analyzing
---                   linkCFG (PBlockSeq newBSTail (unusedId + 1)) $ prefix ++ [CFGBlock newBSHead (Right $ UncondTarget unusedId)]
---                 Nothing -> error $ "Couldn't locate the address to split on during CFG first pass: " ++ (show curInst)
---         Left (CondNeedSplit splitAddr fallthroughId) ->
---           case splitCFGBInList unusedId splitAddr prefix of
---             Just newPrefix ->
---               -- It worked, we found it. Now just recurse as normal, linking our newly inserted block
---               linkCFG (PBlockSeq blockStream (unusedId + 1)) $ newPrefix ++ [CFGBlock curBlock (Right $ CondTarget unusedId fallthroughId)]
---             Nothing ->
---               -- It didn't work, we need to look for a block that we haven't yet converted
---               case splitBlockInList unusedId splitAddr (curBlock:blockStream) of
---                 Just (newBSHead:newBSTail) ->
---                   -- Found it, recurse. We need to use the replacement
---                   -- version of blockStream for both head and tail
---                   -- since we might have split the block we are
---                   -- currently analyzing
---                   linkCFG (PBlockSeq newBSTail (unusedId + 1)) $ prefix ++ [CFGBlock newBSHead (Right $ CondTarget unusedId fallthroughId)]
---                 Nothing -> error $ "Couldn't locate the address to split on during CFG first pass: " ++ (show curInst)
+  {- | Takes a list of blocks and produces a list of pairs (block, maybe
+   nextId) where the id is from the next suquesntial block, or nothing
+   if there isn't one. | -}
+doubleList :: [PBlock] -> [(PBlock, Maybe Integer)]
+doubleList (h:n:r) = ((h, Just (n^.blockId)):(doubleList (n:r)))
+doubleList (h:[]) = (h, Nothing):[]
+doubleList [] = []
 
--- ULTRA TODO: fix up the above with the refactor
+initialGraph :: PFunction -> Either String CFG
+initialGraph func = do
+  sList <- sequence $ map single (doubleList (func^.blocks))
+  zipped <- return $ zip (func^.blocks) sList
+  cfgbList <- return $ map (uncurry CFGBlock) zipped
+  return $ CFG cfgbList (error "Todo, plumb nextId") False (func^.name)
 
--- initialGraph :: PFunction -> CFG
--- ^ Do the simple connecting of blocks using fallthroughs and
--- addresses. This should be exposed, but the workhorse should not.
--- initialGraph func = linkCFG func []
+  where mToE = (\ msg v -> case v of
+                   Just a -> Right a
+                   Nothing -> Left msg)
+        lbMap = locToBidMapper func
+        single = (\(block, mNextId) -> do
+                     let finalInst = terminating block
+                         mTarget = branchTarget finalInst
+                       in
+                       case (finalInst^.opt) of
+                         RETURN _vn -> Right $ Right ExternReturn
+                         BRANCH _target -> do
+                           tid <- (mToE "Bad branch target" (mTarget >>= (flip Map.lookup lbMap)))
+                           return $ Right $ UncondTarget tid
+                         CBRANCH cond _target -> do
+                           tid <- (mToE "Bad cbranch target" (mTarget >>= (flip Map.lookup lbMap)))
+                           nid <- mToE "Fallthrough on final block" mNextId
+                           return $ Right $ CondTarget cond tid nid
+                         BRANCHIND _ -> Right $ Left Indirect
+                         _ -> Left "unexpected final instruction during CFG pass")
 
+-- TODO should probably be a maybe return type or something
 cfgCommitNonIndirect :: CFG -> CFG
 -- ^ Sets the stable flag in the event that this CFG has no non-extern
 -- indirect jumps. Does nothing if flag is already set
@@ -327,6 +313,7 @@ cfgCommitNonIndirect input =
 -- which things need to be arugments in the cruicble arg-passing cfg
 -- style.
 
+-- TODO decide if this is still current
 -- TODO we need to be careful, since varnodes don't have the disjoint
 -- nature of registers. I need to check what the llvm IR's take on
 -- this problem is, but we should:

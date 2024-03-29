@@ -60,7 +60,7 @@ collectBlockArgs acfg =
               (filter ((== "register") . (view addrSpace)) rawVNList)
               priorMap
 
-{- | A concrete register for us is an 8byte register that is dijoint
+{- | A concrete register for us is an 8byte register that is disjoint
    with all other concrete registers. They are indexed from zero, and
    correspond with the varnode register space such that a byte at
    address `a` will lie in register `a / 8`. This is implemented as a

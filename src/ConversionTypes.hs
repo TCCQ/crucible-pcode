@@ -69,7 +69,7 @@ type PCodeGenerator s a = C.Gen.Generator () s (CGenState) RegisterSet (Either S
 -- Positive compiletime restriction
 data SomePos = forall n. 1 <= n => SomePos (NatRepr n)
 
-data BVApp s w = BVApp (NatRepr w) (C.Expr.App () (C.Reg.Expr () s) (BVType w))
+data BVApp s w = BVApp (NatRepr w) (C.Reg.Expr () s (BVType w))
 
 data BVDest s w = BVDest (NatRepr w) ((BVApp s w) -> PCodeGenerator s ())
 

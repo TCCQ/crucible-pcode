@@ -27,9 +27,9 @@ import Lang.Crucible.Types
 import What4.ProgramLoc
 
 import PCode
+import Analysis
 import ConversionTypes
 import PreCrucible
-
 
 instance MonadFail (Either String) where
   fail = Left
@@ -37,7 +37,6 @@ instance MonadFail (Either String) where
 instPos :: PInst -> Position
 instPos (PInst loc _) =
   OtherPos $ pack $ "(" ++ (show (loc^.maddr)) ++ "," ++ (show (loc^.offset)) ++ ")"
-
 
 mkSomePos :: Integer -> Maybe SomePos
 mkSomePos x = do
@@ -50,21 +49,6 @@ appToDest (Some outVal@(BVApp outW _outExpr)) (Some (BVDest inW inLoc)) =
   case testEquality outW inW of
     Just Refl -> inLoc outVal
     Nothing -> lift $ Left "Widths didn't match between value and destination."
-
--- {- | Make a function defined for all params from one that is defined for
---    a single choice. | -}
--- projectCheck :: forall m w b. (MonadFail m) => NatRepr w -> ((BVApp w) -> m b) -> forall x. (BVApp x) -> m b
--- projectCheck param func val@(BVApp width _expr) =
---   case testEquality param width of
---     Just Refl -> func val
---     Nothing -> fail "Width didn't match during attempted projectCheck"
-
--- {- | Does what >>= does, but also handles projecting out of the internal
---    extistential | -}
--- eApplyM :: forall k m (f :: k -> Type) b.
---   Monad m => m (Some f) -> (forall (w :: k). f w -> m b) -> m b
--- eApplyM exVal func =
---   exVal >>= (viewSome func)
 
 -- TODO Make this an extension app.
 
@@ -129,7 +113,7 @@ varToSource vn
                LeqProof <- testLeq (addNat idxE lenE) width
                return $ do
                  regBV <- readReg reg
-                 slice <- return $ BVSelect idxE lenE width regBV
+                 slice <- return $ Reg.App $ BVSelect idxE lenE width regBV
                  wrapped <- return $ BVApp lenE slice
                  return $ Some wrapped
            ) of
@@ -173,16 +157,20 @@ varToDestination vn
                  Refl <- testEquality width (knownNat @64)
                  LeqProof <- testLeq (addNat idxE lenE) width
 
-                 return $ BVDest lenE (\(BVApp _awidth inner) -> do
-                                          -- Refl <- lift $ testEquality inW lenE
-                                          -- inExpr <- return inner
+                 -- We need to construct the existential inside this
+                 -- do, because ghc under-generalizes its type
+                 -- otherwise.
+                 return $ Some $ BVDest lenE (\(BVApp inW inner) -> do
+                                          Refl <- lift $ case (testEquality inW lenE) of
+                                            Just Refl -> Right Refl
+                                            Nothing -> Left "Width didn't match between BVDest and BVApp"
+                                          inExpr <- return inner
                                           -- nval <- error "" -- TODO (readReg reg) >>= (return . (BVPaste idxE lenE width inExpr))
                                           -- assignReg reg nval --TODO need wrapping to get a eval?
-                                          -- error ""
-                                          return ()
+                                          error ""
                                       )
              ) of
-          Just ret -> return $ Some ret
+          Just ret -> return $ ret
           Nothing -> lift $ Left $ "Error during varToDest. Do you have a well formed varnode? :" ++ (show vn)
   | otherwise =
       error $ "unexpected address space: " ++ arSp
@@ -196,7 +184,15 @@ varToDestination vn
 arithAction :: POpt -> PCodeGenerator s ()
 arithAction (COPY va out) =
   join $ appToDest <$> (varToSource va) <*> (varToDestination out)
--- arithAction (INT_ADD va vb out) =
+arithAction (INT_ADD va vb out) =
+  join $ appToDest <$> (do
+                           a@(Some(BVApp awidth aexpr)) <- varToSource va
+                           b@(Some(BVApp bwidth bexpr)) <- varToSource vb
+                           Just Refl <- return $ testEquality awidth bwidth
+                           Just LeqProof <- return $ isPosNat awidth
+                           oexpr <- return $ Reg.App $ BVAdd awidth aexpr bexpr
+                           return $ Some $ BVApp awidth oexpr
+                       ) <*> (varToDestination out)
 -- arithAction (BOOL_OR va vb out) =
 -- arithAction (INT_SUB va vb out) =
 -- arithAction (INT_CARRY va vb out) =
@@ -230,3 +226,57 @@ arithAction (COPY va out) =
 -- arithAction (BOOL_XOR va vb out) =
 -- arithAction (BOOL_AND va vb out) =
 -- arithAction (POPCOUNT va out) =
+arithAction (LOAD addrSpace offset dest) = do
+  Some (BVDest width dFunc) <- varToDestination dest
+  Just LeqProof <- return $ isPosNat width
+  unconstrained <- mkFresh (BaseBVRepr width) Nothing
+  ucApp <- return $ BVApp width (AtomExpr unconstrained)
+  dFunc ucApp
+arithAction (STORE addrSpace offset src) =
+  return ()
+
+
+{- | Similar to above, but for terminating statements.
+
+TODO how do tail calls fit into this? I don't model them because I
+don't model calling convention stack stuff, so I don't think I can
+actually catch when they happen. I guess they aren't supported. But
+they aren't in C so it should be fine. | -}
+termAction :: Successor -> PCodeGenerator s a
+termAction succ =
+  case succ of
+      Fallthrough nextId -> do
+        blockLabelMap <- liftM (view labelMap) get
+        nextLabel <- return $ (Map.!) blockLabelMap nextId
+        jump nextLabel
+
+      UncondTarget targetId -> do
+        blockLabelMap <- liftM (view labelMap) get
+        targetLabel <- return $ (Map.!) blockLabelMap targetId
+        jump targetLabel
+
+      CondTarget flagV targetId nextId -> do
+        blockLabelMap <- liftM (view labelMap) get
+        targetLabel <- return $ (Map.!) blockLabelMap targetId
+        nextLabel <- return $ (Map.!) blockLabelMap nextId
+        flag <- do
+            Some (BVApp width val) <- varToSource flagV
+            Just LeqProof <- return $ isPosNat width
+            capp <- return $ BVNonzero width val
+            return $ Reg.App capp
+        branch flag targetLabel nextLabel
+
+      ExternReturn -> do
+        regMap <- liftM (view regMap) get
+        rSet <- error "TODO convert into RegisterSet"
+        returnFromFunction rSet
+
+blockAction :: Reg.Label s -> ACFGBlock -> PCodeGenerator s ()
+blockAction blockLabel block =
+  defineBlock blockLabel
+  (do
+      instStream <- return $ init (block^.aBlock^.stream)
+                    -- doesn't include terminating inst
+      sequence (map (arithAction . (view opt)) instStream)
+      (termAction (block^.aSuccs)))
+

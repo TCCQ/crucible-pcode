@@ -149,8 +149,8 @@ indirectP (PInst _ popt) =
    successor | -}
 terminalP :: PInst -> Bool
 terminalP inst = case (inst^.opt) of
-          CALL _ -> True
-          CALLIND _ -> True
+          -- CALL _ -> True
+          -- CALLIND _ -> True
           RETURN _ -> True
           BRANCH _ -> True
           CBRANCH _ _ -> True
@@ -317,23 +317,44 @@ at :: PInst -> PAddr -> Bool
 -- ^ Is this instruction here? likely want infix for smooth reading
 at i addr = (==) addr $ _location i
 
--- branchTarget :: PInst -> PAddr
--- {- ^ Extract the correct target for branches and conditional
--- branches. Do the discriminating between pcode relative and regular
--- here. Only cares about the non-fallthrough target if there is more
--- than one possible successor instruction. -}
--- branchTarget (PInst addr (BRANCH (VarNode space vnoffset length))) =
---   if space == "constant"
---   then error "TODO check the pcode spec for branch"
---   else
---     if space == "" --TODO what is the other special one?
---     then error "TODO check spec"
---     else error $ "Branch with unexpected space: " ++ space
--- branchTarget (PInst addr (CBRANCH _condition (VarNode space vnoffset length))) =
---   error "TODO"
--- branchTarget (PInst addr (CALL (VarNode space vnoffset length))) =
---   error "TODO"
--- branchTarget _ = error "Called branchTarget on non branch"
--- -- TODO this is incomplete, but I think we should be good? I think it
--- -- should be enforced at compile time?
+pcodeOffset (PAddr m o) offset = PAddr m (o + offset)
+maddrOffset (PAddr m o) offset = PAddr (m+offset) 0
+
+branchTarget :: PInst -> Maybe PAddr
+{- | Extract the correct target for branches and conditional
+branches. Do the discriminating between pcode relative and regular
+here. Only cares about the non-fallthrough target if there is more
+than one possible successor instruction. | -}
+branchTarget (PInst addr (BRANCH (VarNode space vnoffset length))) =
+  case space of
+    "constant" ->
+      -- pcode relative branch
+      Just $ pcodeOffset addr vnoffset
+    "ram" ->
+      -- standard machine branch
+      Just $ PAddr (vnoffset) 0
+    space ->
+      error $ "unexpected branch space: " ++ space
+branchTarget (PInst addr (CBRANCH _condition (VarNode space vnoffset length))) =
+  case space of
+    "constant" ->
+      -- pcode relative branch
+      Just $ pcodeOffset addr vnoffset
+    "ram" ->
+      -- standard machine branch
+      Just $ PAddr (vnoffset) 0
+    space ->
+      error $ "unexpected cbranch space: " ++ space
+branchTarget (PInst addr (CALL (VarNode space vnoffset length))) =
+  case space of
+    "constant" ->
+      -- pcode relative branch
+      error "Does pcode support p-code relative calls?"
+      Just $ pcodeOffset addr vnoffset
+    "ram" ->
+      -- standard machine branch
+      Just $ PAddr (vnoffset) 0
+    space ->
+      error $ "unexpected call space: " ++ space
+branchTarget _ = error "Called branchTarget on non branch"
 

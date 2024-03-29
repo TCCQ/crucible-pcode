@@ -62,7 +62,9 @@ library
                       Analysis,
                       PreCrucible,
                       IntoGenerator,
-                      Effects
+                      Effects,
+                      FromDump,
+                      API
 
     -- Modules included in this library but not exported.
     other-modules: VarNodeUtils,
@@ -104,7 +106,8 @@ library
                       parameterized-utils >= 2.1.7.0,
                       mtl >= 2.2.2,
                       bv-sized >= 1.0.5,
-                      text >= 2.0.2
+                      text >= 2.0.2,
+                      parsec >= 3.1.16.1
 
     -- Directories containing source files.
     hs-source-dirs:   src
