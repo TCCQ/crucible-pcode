@@ -29,10 +29,28 @@ import What4.ProgramLoc
 import PCode
 import Analysis
 import ConversionTypes
-import PreCrucible
 
 instance MonadFail (Either String) where
   fail = Left
+
+mToE :: String -> Maybe a -> Either String a
+mToE msg (Just v) = Right v
+mToE msg Nothing = Left msg
+
+{- | Turn register varnodes into concrete registers. VarNodes can become
+   zero or more than one register if they are zero length or length
+   greater than 8. If the list is more than one register long, the
+   resulting registers are in ascending order based on offset. | -}
+concretify :: VarNode -> [ConcreteReg]
+concretify vn
+  | vn^.addrSpace /= "register" = error "concretify non-register varnode"
+  | otherwise =
+    (\v -> if
+        | v^.vnLength == 0 -> []
+        | v^.vnLength <= 8 -> [(ConcreteReg (v^.vnOffset `div` 8))]
+        | otherwise ->
+          ((ConcreteReg (v^.vnOffset `div` 8))):(concretify (shorten vn))) vn
+  where shorten = (over vnOffset (8+)) . (over vnLength ((-8)+))
 
 instPos :: PInst -> Position
 instPos (PInst loc _) =
@@ -87,18 +105,20 @@ varToSource :: forall s. VarNode -> PCodeGenerator s (Some (BVApp s))
 varToSource vn
   -- len /= 8 = error "Varnode length in source."
     -- TODO this is way less general than I want
-  | arSp == "ram" =
+  | arSp == "ram" = do
       -- TODO all memory acesses are fully arbitrary for now. Consider
       -- using the LLVM memory model
-      error ""
-      -- liftM AtomExpr $ mkFresh (BaseBVRepr (knownNat @64)) Nothing
-  | arSp == "temporary" =
-      error "temp space currently unsupported"
-  | arSp == "constant" =
-      error "TODO: fix type level constraints for BVLit"
-      -- BVLit (knownNat 64) $ mkBV (len * 8) off
-  | arSp == "register" =
-    do
+      SomePos lenE <- lift $ mToE "Negative vn length in const" $ mkSomePos (len * 8)
+      mkFresh (BaseBVRepr lenE) Nothing >>= (return . AtomExpr) >>= (return . Some . BVApp lenE)
+  | arSp == "unique" = do
+      -- tmp space for pcode local values. single write with perfect
+      -- match on offset and length in state map
+      tmap <- get >>= return . (view tmpMap)
+      return $ (Map.!) tmap (OffsetLenPair (off, len))
+  | arSp == "constant" = do
+      SomePos lenE <- lift $ mToE "Negative vn length in const" $ mkSomePos (len * 8)
+      return $ Some $ BVApp lenE $ App $ BVLit lenE $ mkBV lenE off
+  | arSp == "register" = do
       rmap <- get >>= return . (view regMap)
       headCReg:[] <- return $ concretify vn
       -- TODO this uses MonadFail for all ways this can fail
@@ -119,8 +139,8 @@ varToSource vn
            ) of
         Just ret -> ret
         Nothing -> lift $ Left $ "Error in varToSource. Do you have a well formed varnode? : " ++ (show vn)
-  | otherwise =
-      error $ "unexpected address space: " ++ arSp
+  | arSp == "temporary" = error "temp space currently unsupported"
+  | otherwise = error $ "unexpected address space: " ++ arSp
   where len = vn^.vnLength
         off = vn^.vnOffset
         arSp = vn^.addrSpace
@@ -132,19 +152,25 @@ varToSource vn
    to the initial varnode. | -}
 varToDestination :: forall s. VarNode -> PCodeGenerator s (Some (BVDest s))
 varToDestination vn
-  -- len /= 8 = error "Varnode length in source."
-    -- TODO this is way less general than I want
-  | arSp == "ram" =
-      -- TODO all memory acesses are fully arbitrary for now. Consider
-      -- using the LLVM memory model
-      error ""
-      -- liftM AtomExpr $ mkFresh (BaseBVRepr (knownNat @64)) Nothing
-  | arSp == "temporary" =
-      error "temp space currently unsupported"
-  | arSp == "constant" =
-      error "Constant Address Space as destination of P-Code operation"
-  | arSp == "register" =
-      do
+  | arSp == "ram" = do
+      SomePos lenE <- lift $ mToE "Negative vn len in unique" $ mkSomePos (vn^.vnLength)
+      return $ Some $ BVDest lenE (\ (BVApp inW inner) -> do
+                                      Refl <- lift $ case (testEquality inW lenE) of
+                                        Just Refl -> Right Refl
+                                        Nothing -> Left "Width didn't match between BVDest and BVApp"
+                                      -- TODO this doesn't do anything other than check that the widths match
+                                      return ())
+  | arSp == "unique" = do
+      tmap <- get >>= return . (view tmpMap)
+      SomePos lenE <- lift $ mToE "Negative vn len in unique" $ mkSomePos (vn^.vnLength)
+      return $ Some $ BVDest lenE (\ bva@(BVApp inW inner) -> do
+                                      Refl <- lift $ case (testEquality inW lenE) of
+                                                       Just Refl -> Right Refl
+                                                       Nothing -> Left "Width didn't match between BVDest and BVApp"
+                                      key <- return $ OffsetLenPair (off, len)
+                                      nextMap <- return $ Map.insert key (Some bva) tmap
+                                      modify (set tmpMap nextMap))
+  | arSp == "register" = do
         rmap <- get >>= return . (view regMap)
         headCReg:[] <- return $ concretify vn
         -- TODO this uses MonadFail for all ways this can fail
@@ -172,8 +198,9 @@ varToDestination vn
              ) of
           Just ret -> return $ ret
           Nothing -> lift $ Left $ "Error during varToDest. Do you have a well formed varnode? :" ++ (show vn)
-  | otherwise =
-      error $ "unexpected address space: " ++ arSp
+  | arSp == "constant" = error "Constant Address Space as destination of P-Code operation"
+  | arSp == "temporary" = error "temp space currently unsupported"
+  | otherwise = error $ "unexpected address space: " ++ arSp
   where len = vn^.vnLength
         off = vn^.vnOffset
         arSp = vn^.addrSpace
@@ -234,7 +261,6 @@ arithAction (LOAD addrSpace offset dest) = do
   dFunc ucApp
 arithAction (STORE addrSpace offset src) =
   return ()
-
 
 {- | Similar to above, but for terminating statements.
 
