@@ -44,58 +44,82 @@ mkFlMap plist = do
    cfg. | -}
 mkLabelMap :: AugCFG -> PCodeGenerator s (LabelMap s)
 mkLabelMap acfg =
-  fmap Map.fromList $ sequence $ fmap blockToIdLabelPair (acfg^.aBlockList)
+  (liftM Map.fromList) $ sequence $ fmap blockToIdLabelPair (acfg^.aBlockList)
   where blockToIdLabelPair :: ACFGBlock -> PCodeGenerator s ((Integer, C.Reg.Label s))
         blockToIdLabelPair block = do
           l <- newLabel
           return (block^.aBlock^.blockId, l)
 
--- TODO right signature here?
+type PRegAssocRepr = StructRepr ((SingleCtx NatType) ::> (BVType 64))
+
 {- | Make all the registers that the cfg generator expects to be able to
    access. | -}
 mkRegMap :: Assignment (Atom s) (SingleCtx FuncStateBundle) -> PCodeGenerator s (RegMap s)
 mkRegMap initials =
-  error "TODO mkRegMap"
+  case (decompose initials) of
+    (Empty, fsb) -> do
+      -- fsb is atom of a sequence
+      foldAssocM fsb
+  where singleReg :: (Atom s PRegAssoc) -> PCodeGenerator s ((ConcreteReg, CMangagedRegHandle s))
+        singleReg assoc = do
+          -- decompose pair into offset index and value
+          pairSize <- return $ Size ((SingleCtx NatType) ::> (BVType 64))
+          Just (Some offsetI) <- intIndex 0 pairSize
+          Just (Some valI) <- intIndex 1 pairSize
+          offset <- return $ GetStruct assoc offsetI NatRepr
+          val <- return $ GetStruct assoc valI (BVRepr 64)
+          creg <- return $ ConcreteReg offset
+          crucibleRegisterHandle <- newReg val
+          return (creg, crucibleRegisterHandle)
+        foldAssocM :: (Atom s PRegBundle) -> PCodeGenerator s (RegMap s)
+        foldAssocM aseq = do
+          done <- return $ SequenceIsNil PRegAssocRepr aseq
+          ifteM (done)
+            (return Map.Empty)
+            (do
+                h <- return $ SequenceHead PRegAssocRepr aseq
+                t <- return $ SequenceTail PRegAssocRepr aseq
+                rPair <- singleReg h
+                liftM ((uncurry Map.insert) rPair) (foldAssocM t))
+
 
 {- | Produce the generator action internal to this cfg. Basically do the
    block actions for all the blocks. | -}
-intoGenerator :: FunctionLocationMap -> AugCFG -> PCodeGenerator s ()
-intoGenerator funcMap acfg = do
-  lmap <- mkLabelMap acfg
-  rmap <- error "TODO" --mkRegMap acfg
-  tmap <- return Map.empty
+intoFuncDef :: FunctionLocationMap -> AugCFG -> FunctionDef () CGenState FuncStateBundle FuncStateBundle (Either String)
+intoFuncDef funcMap acfg =
+  case (unsnoc retBlocks) of
+    Nothing -> error "no returns from this function"
+    Just (otherExits, finalExit) ->
+      let gAction = (mapM singleBlockAction internalBlocks) >>
+                       (mapM singleBlockAction otherExits) >>
+                       (singleBlockAction finalExit)
+      in
+        (\ funcArgAssignment ->
+           -- since the state has cfg local stuff, we can only make it
+           -- inside the generator. So we have a fake initial state
+           -- and our actions starts by filling it in
+           ((CGenState fLocMap Map.empty Map.empty),
+            (
+              do
+                state <- get
+                lmap <- mkLabelMap acfg
+                rmap <- mkRegMap acfg --creates and fills the regmap
+                put $ ((set labelMap lmap) . (set regMap rmap)) state
 
-  actionList <- mapM (\block ->
-                       blockAction ((Map.!) lmap (block^.aBlock^.blockId)) block
-                       ) (acfg^.aBlockList)
-  -- TODO this seems odd in terms of types, but I think still
-  -- works. The info I care about is in the monad not in the value. We
-  -- just have to use this monad when producing a CFG for this
-  -- function
-  return ()
--- TODO use langston's help, get proper function level return type
-
-{- | Change our generator action into a Function Definition by supplying
-   initial state and spinning up the default register contents and
-   whatnot. | -}
--- mkFunctionDef :: FunctionLocationMap -> AugCFG ->
---                  FunctionDef () CGenState (SingleCtx FuncStateBundle) FuncStateBundle (Either String)
--- mkFunctionDef fLocMap acfg =
---   (\ initialAssignment ->
---       -- since the state has cfg local stuff, we can only make it
---       -- inside the generator, so we have a fake initial state, and
---       -- our actions starts by filling it in
---      ((CGenState fLocMap Map.empty Map.empty),
---       (
---          do
---            state <- get
---            lmap <- mkLabelMap acfg
---            rmap <- mkRegMap acfg
---            -- TODO use intialAssignment to fill the RegMap
---            put $ ((set labelMap lmap) . (set regMap rmap)) state
---            -- Now our initial state is set up
---            intoGenerator fLocMap acfg
---       )))
+                intoGenerator fLocMap acfg
+            )))
+    -- this is odd, but basically I want each action to be evaluated
+    -- once and the last one has to be something that returns the
+    -- proper type for the definition
+  where isRetBlock block =
+          case (last (block^.aBlock^.stream)) of
+            _ (RETURN _) -> True
+            _ _ -> False
+        retBlocks = filter isRetBlock (acfg^.aBlockList)
+        internalBlocks = filter (not . isRetBlock) (acfg^.aBlockList)
+        singleBlockAction block = do
+          labelMap <- get^.labelMap
+          blockAction ((Map.!) labelMap (block^.aBlock^.blockId)) block
 
 -- -------------------------------------------------------------------
 --
@@ -123,7 +147,7 @@ intoGenerator funcMap acfg = do
 --           (view aSuccs) .
 --           ((Map.!) inmap)
 
--- -- TODO is this the right place to stop caring about
+-- -- T ODO is this the right place to stop caring about
 -- -- memory/references, and only registers?
 
 -- {- | Collect the varnodes that need to be block arguments. Return a map

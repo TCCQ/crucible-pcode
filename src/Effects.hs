@@ -268,18 +268,20 @@ TODO how do tail calls fit into this? I don't model them because I
 don't model calling convention stack stuff, so I don't think I can
 actually catch when they happen. I guess they aren't supported. But
 they aren't in C so it should be fine. | -}
-termAction :: Successor -> PCodeGenerator s a
+termAction :: Successor -> PCodeGenerator s (Maybe (Atom s FuncStateBundle))
 termAction succ =
   case succ of
       Fallthrough nextId -> do
         blockLabelMap <- liftM (view labelMap) get
         nextLabel <- return $ (Map.!) blockLabelMap nextId
         jump nextLabel
+        return Nothing
 
       UncondTarget targetId -> do
         blockLabelMap <- liftM (view labelMap) get
         targetLabel <- return $ (Map.!) blockLabelMap targetId
         jump targetLabel
+        return Nothing
 
       CondTarget flagV targetId nextId -> do
         blockLabelMap <- liftM (view labelMap) get
@@ -291,13 +293,14 @@ termAction succ =
             capp <- return $ BVNonzero width val
             return $ Reg.App capp
         branch flag targetLabel nextLabel
+        return Nothing
 
       ExternReturn -> do
         regMap <- liftM (view regMap) get
         rSet <- error "TODO convert into RegisterSet"
-        returnFromFunction rSet
+        return $ Just $ returnFromFunction rSet
 
-blockAction :: Reg.Label s -> ACFGBlock -> PCodeGenerator s ()
+blockAction :: Reg.Label s -> ACFGBlock -> PCodeGenerator s (Maybe (Atom s FuncStateBundle))
 blockAction blockLabel block =
   defineBlock blockLabel
   (do
